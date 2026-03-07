@@ -4,11 +4,11 @@ import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Chec
 // 預設內建的部分精選單字
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|",
-  "anomalous|[əˋnɑmələs]|反常的、不規則的 [類] aberrant, deviant, heteroclite, preternatural|adj. different from what is normal; irregular|the anomalous test results|",
-  "sanguine|[`sæŋgwɪn]|自信樂觀的 [類] confident, optimistic|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit.|毀三觀之前（三觀：世界觀、人生觀、價值觀）是自信的",
-  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|",
-  "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  "innocuous|[ɪˋnɑkjʊəs]|（行為、言論）無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
+  // "anomalous|[əˋnɑmələs]|反常的、不規則的 [類] aberrant, deviant, heteroclite, preternatural|adj. different from what is normal; irregular|the anomalous test results|",
+  // "sanguine|[`sæŋgwɪn]|自信樂觀的 [類] confident, optimistic|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit.|毀三觀之前（三觀：世界觀、人生觀、價值觀）是自信的",
+  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|",
+  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
+  // "innocuous|[ɪˋnɑkjʊəs]|（行為、言論）無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
