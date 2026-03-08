@@ -1,0 +1,16 @@
+{
+    "name": "Mason 1000 單字卡",
+    "short_name": "Mason單字",
+    "description": "Mason 1000 精選單字卡學習系統",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#f8fafc",
+    "theme_color": "#4f46e5",
+    "icons": [
+        {
+            "src": "/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
