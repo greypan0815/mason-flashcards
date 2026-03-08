@@ -19,45 +19,46 @@ const initialVocabulary = defaultWordsList.map(str => {
   };
 });
 
-// 格式化日期為 YYYY-MM-DD
 const getTodayStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 export default function App() {
-  // === 核心資料狀態 ===
   const [originalDeck, setOriginalDeck] = useState(() => {
     try { const saved = localStorage.getItem('mason-deck'); return saved ? JSON.parse(saved) : initialVocabulary; } catch (e) { return initialVocabulary; }
   });
   
-  // App 模式: 'study' (預設翻卡), 'due' (SRS 複習), 'quiz' (測驗), 'starred' (星號收藏)
-  const [appMode, setAppMode] = useState('study');
-  const [searchQuery, setSearchQuery] = useState('');
+  // === 狀態記憶核心優化 (獨立記憶每個頁籤的進度) ===
+  const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [indexes, setIndexes] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, starred: 0 }; }
+    catch { return { study: 0, due: 0, quiz: 0, starred: 0 }; }
+  });
+
+  const [isShuffled, setIsShuffled] = useState(() => localStorage.getItem('mason-isShuffled') === 'true');
+  const [shuffledWords, setShuffledWords] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('mason-shuffledWords')) || []; }
+    catch { return []; }
+  });
+
+  const [searchQuery, setSearchQuery] = useState('');
   const [isFlipped, setIsFlipped] = useState(false);
-  const [isShuffled, setIsShuffled] = useState(false);
 
-  // 測驗模式狀態
   const [quizOptions, setQuizOptions] = useState([]);
-  const [quizResult, setQuizResult] = useState(null); // null, 'correct', 'wrong'
+  const [quizResult, setQuizResult] = useState(null); 
 
-  // Modal 狀態
   const [showDataModal, setShowDataModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [importText, setImportText] = useState('');
   const [isPdfLoaded, setIsPdfLoaded] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
 
-  // === 統計與 SRS (艾賓浩斯) 資料 ===
-  // stats 結構: { [word]: { ease: 2.5, interval: 0, dueDate: timestamp, views: 0, starred: boolean } }
   const [stats, setStats] = useState(() => {
     try { const saved = localStorage.getItem('mason-stats'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
   });
 
-  // === 遊戲化打卡資料 ===
-  // activity 結構: { "2023-10-25": 15, "2023-10-26": 42 }
   const [activity, setActivity] = useState(() => {
     try { const saved = localStorage.getItem('mason-activity'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
   });
@@ -66,7 +67,6 @@ export default function App() {
   const pdfInputRef = useRef(null);
   const csvInputRef = useRef(null);
 
-  // 初始化 PDF.js
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
@@ -77,12 +77,28 @@ export default function App() {
     document.head.appendChild(script);
   }, []);
 
-  // 本地儲存同步
+  // 儲存所有狀態
   useEffect(() => { localStorage.setItem('mason-deck', JSON.stringify(originalDeck)); }, [originalDeck]);
   useEffect(() => { localStorage.setItem('mason-stats', JSON.stringify(stats)); }, [stats]);
   useEffect(() => { localStorage.setItem('mason-activity', JSON.stringify(activity)); }, [activity]);
+  useEffect(() => { localStorage.setItem('mason-appMode', appMode); }, [appMode]);
+  useEffect(() => { localStorage.setItem('mason-indexes', JSON.stringify(indexes)); }, [indexes]);
+  useEffect(() => { localStorage.setItem('mason-isShuffled', isShuffled); }, [isShuffled]);
+  useEffect(() => { localStorage.setItem('mason-shuffledWords', JSON.stringify(shuffledWords)); }, [shuffledWords]);
 
-  // 動態計算當前需要顯示的牌組
+  // 動態取得當前頁籤的 Index
+  const currentIndex = indexes[appMode] || 0;
+
+  // 更新當前頁籤 Index 的安全函數
+  const updateCurrentIndex = (updater) => {
+    setIndexes(prev => {
+      const currentVal = prev[appMode] || 0;
+      const newVal = typeof updater === 'function' ? updater(currentVal) : updater;
+      return { ...prev, [appMode]: newVal };
+    });
+  };
+
+  // 動態計算當前需要顯示的牌組 (結合穩定洗牌)
   const activeDeck = useMemo(() => {
     let filtered = originalDeck;
     if (searchQuery.trim()) {
@@ -94,33 +110,35 @@ export default function App() {
       filtered = originalDeck.filter(c => stats[c.word]?.starred);
     }
     
-    // 如果套用隨機，且不在測驗模式，則打亂順序
-    if (isShuffled && appMode !== 'quiz' && !searchQuery) {
-      return [...filtered].sort(() => Math.random() - 0.5);
+    // 使用預先生成的 shuffledWords 來進行穩定排序，防止重新渲染時單字亂跳
+    if (isShuffled && appMode !== 'quiz' && !searchQuery && shuffledWords.length > 0) {
+      const orderMap = new Map(shuffledWords.map((w, i) => [w, i]));
+      filtered = [...filtered].sort((a, b) => {
+        const indexA = orderMap.has(a.word) ? orderMap.get(a.word) : Infinity;
+        const indexB = orderMap.has(b.word) ? orderMap.get(b.word) : Infinity;
+        return indexA - indexB;
+      });
     }
     return filtered;
-  }, [originalDeck, appMode, searchQuery, isShuffled, stats]);
+  }, [originalDeck, appMode, searchQuery, isShuffled, shuffledWords, stats]);
 
-  // 校正 Index，確保不越界
+  // 校正 Index 防呆機制：若刪除/過濾導致牌組變短，自動退回有效範圍
   useEffect(() => {
     if (activeDeck.length > 0 && currentIndex >= activeDeck.length) {
-      setCurrentIndex(0);
+      updateCurrentIndex(Math.max(0, activeDeck.length - 1));
     }
-  }, [activeDeck, currentIndex]);
+  }, [activeDeck.length, currentIndex, appMode]);
 
   const currentCard = activeDeck[currentIndex];
 
-  // 記錄活躍度 (今天背了幾個字)
   const logActivity = () => {
     const today = getTodayStr();
     setActivity(prev => ({ ...prev, [today]: (prev[today] || 0) + 1 }));
   };
 
-  // 生成測驗選項
   useEffect(() => {
     if (appMode === 'quiz' && currentCard) {
       setQuizResult(null);
-      // 從總牌組中隨機挑3個錯誤解釋
       const wrongCards = [...originalDeck].filter(c => c.word !== currentCard.word).sort(() => 0.5 - Math.random()).slice(0, 3);
       const options = [currentCard, ...wrongCards].sort(() => 0.5 - Math.random());
       setQuizOptions(options);
@@ -128,12 +146,11 @@ export default function App() {
   }, [appMode, currentIndex, currentCard, originalDeck]);
 
   const handleQuizAnswer = (selectedWord) => {
-    if (quizResult) return; // 已經答過就不能再按
+    if (quizResult) return; 
     const isCorrect = selectedWord === currentCard.word;
     setQuizResult(isCorrect ? 'correct' : 'wrong');
     logActivity();
     
-    // 自動更新 SRS 狀態 (答對視為 Good，答錯視為 Again)
     handleSRS(isCorrect ? 2 : 0, true);
 
     setTimeout(() => {
@@ -141,7 +158,6 @@ export default function App() {
     }, 1200);
   };
 
-  // 語音播放
   const speak = (e, text, lang = 'en-US') => {
     e.stopPropagation(); 
     if ('speechSynthesis' in window) {
@@ -156,12 +172,12 @@ export default function App() {
 
   const handleNext = () => {
     setIsFlipped(false);
-    setTimeout(() => setCurrentIndex((prev) => (prev + 1) % activeDeck.length), 150);
+    setTimeout(() => updateCurrentIndex((prev) => (prev + 1) % activeDeck.length), 150);
   };
 
   const handlePrev = () => {
     setIsFlipped(false);
-    setTimeout(() => setCurrentIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length), 150);
+    setTimeout(() => updateCurrentIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length), 150);
   };
 
   const toggleStar = (e, word) => {
@@ -169,8 +185,6 @@ export default function App() {
     setStats(prev => ({ ...prev, [word]: { ...prev[word], starred: !prev[word]?.starred } }));
   };
 
-  // === 🧠 SRS 艾賓浩斯間隔記憶演算法 ===
-  // 0: 重來 (Again), 1: 困難 (Hard), 2: 熟悉 (Good), 3: 簡單 (Easy)
   const handleSRS = (quality, fromQuiz = false) => {
     if (!currentCard) return;
     const word = currentCard.word;
@@ -182,7 +196,7 @@ export default function App() {
 
       if (quality === 0) {
         newEase = Math.max(1.3, newEase - 0.2);
-        newInterval = 0; // 0 天代表今天立刻/稍後就要複習
+        newInterval = 0; 
       } else if (quality === 1) {
         newEase = Math.max(1.3, newEase - 0.15);
         newInterval = Math.max(1, newInterval * 1.2);
@@ -195,7 +209,7 @@ export default function App() {
 
       const dueDate = new Date();
       if (newInterval > 0) dueDate.setDate(dueDate.getDate() + Math.round(newInterval));
-      else dueDate.setMinutes(dueDate.getMinutes() + 10); // 10分鐘後到期
+      else dueDate.setMinutes(dueDate.getMinutes() + 10); 
 
       return { ...prev, [word]: { ...s, ease: newEase, interval: newInterval, dueDate: dueDate.getTime(), views: (s.views || 0) + 1 } };
     });
@@ -206,25 +220,53 @@ export default function App() {
     }
   };
 
-  // 計算連續打卡天數 (Streak)
   const getStreak = () => {
     let streak = 0;
     let d = new Date();
     while (true) {
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       if (activity[dateStr]) streak++;
-      else if (streak > 0 || dateStr !== getTodayStr()) break; // 允許今天還沒背
+      else if (streak > 0 || dateStr !== getTodayStr()) break;
       d.setDate(d.getDate() - 1);
     }
     return streak;
   };
 
-  // === 資料解析與匯入功能 ===
+  const toggleShuffle = () => {
+    if (appMode === 'quiz') return; 
+    setIsFlipped(false);
+    if (isShuffled) {
+      setIsShuffled(false);
+    } else {
+      const newShuffledWords = [...originalDeck].map(c => c.word).sort(() => Math.random() - 0.5);
+      setShuffledWords(newShuffledWords);
+      setIsShuffled(true);
+    }
+    updateCurrentIndex(0); 
+    lastViewedRef.current = null;
+  };
+
+  // 記錄觀看次數
+  useEffect(() => {
+    if (activeDeck.length > 0 && currentCard) {
+      const word = currentCard.word;
+      if (lastViewedRef.current !== word) {
+        setStats(prev => {
+          const safePrev = prev || {};
+          const currentStats = safePrev[word] || { views: 0, remembered: 0, forgot: 0 };
+          return { ...safePrev, [word]: { ...currentStats, views: (Number(currentStats.views) || 0) + 1 } };
+        });
+        lastViewedRef.current = word;
+      }
+    }
+  }, [currentIndex, activeDeck, currentCard]);
+
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
       setOriginalDeck(newCards);
       setAppMode('study');
-      setCurrentIndex(0); 
+      setIndexes({ study: 0, due: 0, quiz: 0, starred: 0 }); // 匯入新牌組時全面重置進度
+      setSearchQuery('');
       setImportText('');
       alert(`🎉 完美解析！成功匯入 ${newCards.length} 個單字。`);
       setShowDataModal(false);
@@ -355,6 +397,18 @@ export default function App() {
     return originalDeck.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= now).length;
   };
 
+  const clearStats = () => {
+    if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
+      setStats({});
+      setActivity({});
+      setIndexes({ study: 0, due: 0, quiz: 0, starred: 0 });
+      localStorage.removeItem('mason-stats');
+      localStorage.removeItem('mason-activity');
+      localStorage.removeItem('mason-indexes');
+      setShowStatsModal(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
       <style dangerouslySetInnerHTML={{__html: `
@@ -384,7 +438,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* 搜尋與模式切換列 */}
+        {/* 搜尋與模式切換列 (已移除 onClick 中的強制歸零) */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-2 mb-4">
           <div className="relative mb-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
@@ -398,13 +452,13 @@ export default function App() {
           </div>
           
           <div className="flex gap-1">
-            <button onClick={() => {setAppMode('study'); setCurrentIndex(0);}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'study' && !searchQuery ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>📚 全部</button>
-            <button onClick={() => {setAppMode('due'); setCurrentIndex(0);}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors relative ${appMode === 'due' && !searchQuery ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <button onClick={() => {setAppMode('study'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'study' && !searchQuery ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>📚 全部</button>
+            <button onClick={() => {setAppMode('due'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors relative ${appMode === 'due' && !searchQuery ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
               <CalendarCheck size={14} className="inline mr-1" /> 待複習
               {getDueCount() > 0 && <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center animate-bounce">{getDueCount()}</span>}
             </button>
-            <button onClick={() => {setAppMode('quiz'); setCurrentIndex(0);}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'quiz' && !searchQuery ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Gamepad2 size={14} className="inline mr-1" /> 測驗</button>
-            <button onClick={() => {setAppMode('starred'); setCurrentIndex(0);}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'starred' && !searchQuery ? 'bg-amber-400 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Star size={14} className="inline" /></button>
+            <button onClick={() => {setAppMode('quiz'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'quiz' && !searchQuery ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Gamepad2 size={14} className="inline mr-1" /> 測驗</button>
+            <button onClick={() => {setAppMode('starred'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'starred' && !searchQuery ? 'bg-amber-400 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Star size={14} className="inline" /></button>
           </div>
         </div>
 
@@ -601,6 +655,12 @@ export default function App() {
                 <p className="text-lg font-black text-amber-500">{originalDeck.filter(c => stats[c.word]?.starred).length}</p>
                 <p className="text-[10px] font-bold text-slate-400">收藏字</p>
               </div>
+            </div>
+            
+            <div className="pt-4 mt-2 border-t border-slate-100">
+              <button onClick={clearStats} className="w-full flex justify-center gap-2 py-2.5 rounded-xl text-slate-500 hover:bg-rose-50 hover:text-rose-600 font-medium transition-colors">
+                <Trash2 size={18} /> 清除所有學習紀錄
+              </button>
             </div>
           </div>
         </div>
