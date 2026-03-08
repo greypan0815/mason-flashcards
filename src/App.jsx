@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2 } from 'lucide-react';
+import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles } from 'lucide-react';
 
 // 預設精選單字範例
 const defaultWordsList = [
@@ -29,7 +29,6 @@ export default function App() {
     try { const saved = localStorage.getItem('mason-deck'); return saved ? JSON.parse(saved) : initialVocabulary; } catch (e) { return initialVocabulary; }
   });
   
-  // === 狀態記憶核心優化 (獨立記憶每個頁籤的進度) ===
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
@@ -77,7 +76,6 @@ export default function App() {
     document.head.appendChild(script);
   }, []);
 
-  // 儲存所有狀態
   useEffect(() => { localStorage.setItem('mason-deck', JSON.stringify(originalDeck)); }, [originalDeck]);
   useEffect(() => { localStorage.setItem('mason-stats', JSON.stringify(stats)); }, [stats]);
   useEffect(() => { localStorage.setItem('mason-activity', JSON.stringify(activity)); }, [activity]);
@@ -86,10 +84,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem('mason-isShuffled', isShuffled); }, [isShuffled]);
   useEffect(() => { localStorage.setItem('mason-shuffledWords', JSON.stringify(shuffledWords)); }, [shuffledWords]);
 
-  // 動態取得當前頁籤的 Index
   const currentIndex = indexes[appMode] || 0;
 
-  // 更新當前頁籤 Index 的安全函數
   const updateCurrentIndex = (updater) => {
     setIndexes(prev => {
       const currentVal = prev[appMode] || 0;
@@ -98,20 +94,25 @@ export default function App() {
     });
   };
 
-  // 動態計算當前需要顯示的牌組 (結合穩定洗牌)
   const activeDeck = useMemo(() => {
     let filtered = originalDeck;
     if (searchQuery.trim()) {
-      filtered = originalDeck.filter(c => c.word.toLowerCase().includes(searchQuery.toLowerCase()) || c.meaning.includes(searchQuery));
+      const sq = searchQuery.toLowerCase().trim();
+      filtered = originalDeck.filter(c => 
+        (c.word || '').toLowerCase().includes(sq) || 
+        (c.meaning || '').includes(searchQuery)
+      );
     } else if (appMode === 'due') {
       const now = Date.now();
       filtered = originalDeck.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= now);
+      // 待複習模式：永遠優先出現「最過期」的單字
+      filtered.sort((a, b) => (stats[a.word].dueDate || 0) - (stats[b.word].dueDate || 0));
     } else if (appMode === 'starred') {
       filtered = originalDeck.filter(c => stats[c.word]?.starred);
     }
     
-    // 使用預先生成的 shuffledWords 來進行穩定排序，防止重新渲染時單字亂跳
-    if (isShuffled && appMode !== 'quiz' && !searchQuery && shuffledWords.length > 0) {
+    // 如果開啟了智慧排序
+    if (isShuffled && appMode !== 'due' && !searchQuery && shuffledWords.length > 0) {
       const orderMap = new Map(shuffledWords.map((w, i) => [w, i]));
       filtered = [...filtered].sort((a, b) => {
         const indexA = orderMap.has(a.word) ? orderMap.get(a.word) : Infinity;
@@ -122,14 +123,19 @@ export default function App() {
     return filtered;
   }, [originalDeck, appMode, searchQuery, isShuffled, shuffledWords, stats]);
 
-  // 校正 Index 防呆機制：若刪除/過濾導致牌組變短，自動退回有效範圍
+  // 背景自動修正越界 index
   useEffect(() => {
     if (activeDeck.length > 0 && currentIndex >= activeDeck.length) {
       updateCurrentIndex(Math.max(0, activeDeck.length - 1));
     }
   }, [activeDeck.length, currentIndex, appMode]);
 
-  const currentCard = activeDeck[currentIndex];
+  // 使用 Reference 來記住目前的總長度，防止延遲閉包造成的換卡跳號 Bug
+  const activeDeckLengthRef = useRef(activeDeck.length);
+  useEffect(() => { activeDeckLengthRef.current = activeDeck.length; }, [activeDeck.length]);
+
+  const safeIndex = activeDeck.length > 0 ? Math.min(currentIndex, activeDeck.length - 1) : 0;
+  const currentCard = activeDeck[safeIndex];
 
   const logActivity = () => {
     const today = getTodayStr();
@@ -143,19 +149,15 @@ export default function App() {
       const options = [currentCard, ...wrongCards].sort(() => 0.5 - Math.random());
       setQuizOptions(options);
     }
-  }, [appMode, currentIndex, currentCard, originalDeck]);
+  }, [appMode, safeIndex, currentCard, originalDeck]);
 
   const handleQuizAnswer = (selectedWord) => {
     if (quizResult) return; 
     const isCorrect = selectedWord === currentCard.word;
     setQuizResult(isCorrect ? 'correct' : 'wrong');
     logActivity();
-    
-    handleSRS(isCorrect ? 2 : 0, true);
-
-    setTimeout(() => {
-      handleNext();
-    }, 1200);
+    handleSRS(isCorrect ? 3 : 0, true);
+    setTimeout(() => { goNext(false); }, 1200);
   };
 
   const speak = (e, text, lang = 'en-US') => {
@@ -170,14 +172,30 @@ export default function App() {
     }
   };
 
-  const handleNext = () => {
+  // 🔥 強化版翻卡控制：解決跳號與邊界重算問題
+  const goNext = (cardConsumed = false) => {
     setIsFlipped(false);
-    setTimeout(() => updateCurrentIndex((prev) => (prev + 1) % activeDeck.length), 150);
+    setTimeout(() => {
+      updateCurrentIndex((prev) => {
+        const len = activeDeckLengthRef.current || 1;
+        // 如果卡片在評分後被移除了（例如在待複習模式評分），原始陣列長度會縮減
+        // 此時當前的 Index 其實就已經是指向下一個字了，所以不需要 +1
+        if (cardConsumed) {
+          return prev >= len - 1 ? 0 : prev; 
+        }
+        return (prev + 1) % len;
+      });
+    }, 150);
   };
 
-  const handlePrev = () => {
+  const goPrev = () => {
     setIsFlipped(false);
-    setTimeout(() => updateCurrentIndex((prev) => (prev - 1 + activeDeck.length) % activeDeck.length), 150);
+    setTimeout(() => {
+      updateCurrentIndex((prev) => {
+        const len = activeDeckLengthRef.current || 1;
+        return (prev - 1 + len) % len;
+      });
+    }, 150);
   };
 
   const toggleStar = (e, word) => {
@@ -190,9 +208,11 @@ export default function App() {
     const word = currentCard.word;
     
     setStats(prev => {
-      const s = prev[word] || { ease: 2.5, interval: 0, views: 0 };
+      const s = prev[word] || { ease: 2.5, interval: 0, views: 0, remembered: 0, forgot: 0 };
       let newEase = s.ease || 2.5;
       let newInterval = s.interval || 0;
+      let newRemembered = s.remembered || 0;
+      let newForgot = s.forgot || 0;
 
       if (quality === 0) {
         newEase = Math.max(1.3, newEase - 0.2);
@@ -207,16 +227,23 @@ export default function App() {
         newInterval = newInterval === 0 ? 4 : newInterval * newEase * 1.3;
       }
 
+      if (quality <= 1) newForgot += 1;
+      else newRemembered += 1;
+
       const dueDate = new Date();
       if (newInterval > 0) dueDate.setDate(dueDate.getDate() + Math.round(newInterval));
       else dueDate.setMinutes(dueDate.getMinutes() + 10); 
 
-      return { ...prev, [word]: { ...s, ease: newEase, interval: newInterval, dueDate: dueDate.getTime(), views: (s.views || 0) + 1 } };
+      return { 
+        ...prev, 
+        [word]: { ...s, ease: newEase, interval: newInterval, dueDate: dueDate.getTime(), remembered: newRemembered, forgot: newForgot } 
+      };
     });
 
     if (!fromQuiz) {
       logActivity();
-      handleNext();
+      const isConsumed = (appMode === 'due'); // 在待複習模式評分後，單字會被移除
+      goNext(isConsumed);
     }
   };
 
@@ -232,13 +259,24 @@ export default function App() {
     return streak;
   };
 
+  // 🔥 核心邏輯更新：智慧洗牌 (最少瀏覽優先 -> 最常忘記優先 -> 隨機)
   const toggleShuffle = () => {
-    if (appMode === 'quiz') return; 
     setIsFlipped(false);
     if (isShuffled) {
       setIsShuffled(false);
     } else {
-      const newShuffledWords = [...originalDeck].map(c => c.word).sort(() => Math.random() - 0.5);
+      const newShuffledWords = [...originalDeck].sort((a, b) => {
+        const statA = stats[a.word] || { views: 0, forgot: 0 };
+        const statB = stats[b.word] || { views: 0, forgot: 0 };
+        
+        // 優先：把連看都沒看過 (views 越低) 的單字全部往前塞
+        if (statA.views !== statB.views) return statA.views - statB.views;
+        // 次要：如果都看過了，把最常忘記 (forgot 越高) 的單字往前塞
+        if (statA.forgot !== statB.forgot) return statB.forgot - statA.forgot;
+        // 最後：同條件下進行隨機打亂
+        return Math.random() - 0.5;
+      }).map(c => c.word);
+      
       setShuffledWords(newShuffledWords);
       setIsShuffled(true);
     }
@@ -246,7 +284,6 @@ export default function App() {
     lastViewedRef.current = null;
   };
 
-  // 記錄觀看次數
   useEffect(() => {
     if (activeDeck.length > 0 && currentCard) {
       const word = currentCard.word;
@@ -259,13 +296,13 @@ export default function App() {
         lastViewedRef.current = word;
       }
     }
-  }, [currentIndex, activeDeck, currentCard]);
+  }, [safeIndex, activeDeck, currentCard]);
 
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
       setOriginalDeck(newCards);
       setAppMode('study');
-      setIndexes({ study: 0, due: 0, quiz: 0, starred: 0 }); // 匯入新牌組時全面重置進度
+      setIndexes({ study: 0, due: 0, quiz: 0, starred: 0 });
       setSearchQuery('');
       setImportText('');
       alert(`🎉 完美解析！成功匯入 ${newCards.length} 個單字。`);
@@ -409,6 +446,20 @@ export default function App() {
     }
   };
 
+  const cardStats = stats[currentCard?.word] || { views: 0, remembered: 0, forgot: 0 };
+  
+  const getSafeTotal = (key) => {
+    return Object.values(stats).reduce((acc, curr) => {
+      if (typeof curr === 'object' && curr !== null && !isNaN(Number(curr[key]))) return acc + Number(curr[key]);
+      return acc;
+    }, 0);
+  };
+
+  const totalStudied = Object.keys(stats).length;
+  const totalViews = getSafeTotal('views');
+  const totalRemembered = getSafeTotal('remembered');
+  const totalForgot = getSafeTotal('forgot');
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
       <style dangerouslySetInnerHTML={{__html: `
@@ -424,7 +475,6 @@ export default function App() {
 
       <div className="w-full max-w-md relative z-10">
         
-        {/* 頂部列：火焰、標題、選單 */}
         <div className="flex justify-between items-center mb-3 px-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-indigo-700 tracking-wider">M1K</h1>
@@ -438,17 +488,29 @@ export default function App() {
           </div>
         </div>
 
-        {/* 搜尋與模式切換列 (已移除 onClick 中的強制歸零) */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-2 mb-4">
-          <div className="relative mb-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="搜尋中英文單字..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
-            />
+          <div className="relative mb-2 flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+              <input 
+                type="text" 
+                placeholder="搜尋中英文單字..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-50 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
+              />
+            </div>
+            {/* ✨ 智慧推題切換按鈕，支援在測驗或全部模式使用 */}
+            <button 
+              type="button" 
+              onClick={(e) => { e.stopPropagation(); toggleShuffle(); }} 
+              disabled={appMode === 'due'}
+              className={`flex items-center justify-center px-3 rounded-xl text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? 'bg-indigo-600 text-white shadow-md border-transparent' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-100'}`}
+              title={isShuffled ? '目前為智慧推題(優先出現未看過/易忘單字)。點擊切換為原始順序' : '切換為智慧推題(優先出現未看過/易忘單字)'}
+            >
+              {isShuffled ? <Sparkles size={14} className="mr-1" /> : <Shuffle size={14} className="mr-1" />}
+              <span className="hidden sm:inline">{isShuffled ? '智慧推題' : '原始順序'}</span>
+            </button>
           </div>
           
           <div className="flex gap-1">
@@ -462,7 +524,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 狀態提示 */}
         {activeDeck.length === 0 ? (
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             <BrainCircuit size={48} className="mb-4 text-slate-200" />
@@ -470,12 +531,15 @@ export default function App() {
             <p className="text-sm">找不到符合條件的單字。如果你正在「待複習」模式，恭喜你今天任務達成！</p>
           </div>
         ) : appMode === 'quiz' && !searchQuery ? (
-          /* =========================================
-             🎮 測驗模式 (Quiz Mode) UI
-             ========================================= */
           <div className="w-full bg-white rounded-3xl shadow-xl border border-emerald-100 p-6 flex flex-col relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-400"></div>
-            <div className="text-center mb-6 mt-2">
+            
+            <div className="absolute top-4 left-4 flex gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字記得次數"><Check size={10}/> {cardStats.remembered}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字忘記次數"><X size={10}/> {cardStats.forgot}</span>
+            </div>
+
+            <div className="text-center mb-6 mt-4">
               <span className="text-emerald-600 text-xs font-bold tracking-widest uppercase bg-emerald-50 px-3 py-1 rounded-full">選擇正確的意思</span>
               <h2 className="text-4xl font-extrabold text-slate-800 mt-4 mb-1">{currentCard.word}</h2>
               <button onClick={(e) => speak(e, currentCard.word)} className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-emerald-600 transition-colors"><Volume2 size={16}/> 聽發音</button>
@@ -500,7 +564,6 @@ export default function App() {
               })}
             </div>
             
-            {/* 測驗結果小圖示 */}
             {quizResult && (
               <div className={`absolute top-4 right-4 text-2xl animate-in zoom-in ${quizResult === 'correct' ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {quizResult === 'correct' ? '✅' : '❌'}
@@ -508,9 +571,6 @@ export default function App() {
             )}
           </div>
         ) : (
-          /* =========================================
-             📚 翻轉卡片模式 (Study / Due Mode) UI
-             ========================================= */
           <div className="perspective-1000 w-full h-[450px] max-h-[65vh] mb-4 cursor-pointer group" onClick={() => setIsFlipped(!isFlipped)}>
             <div className={`w-full h-full duration-500 transform-style-3d relative transition-transform ${isFlipped ? 'rotate-y-180' : ''}`}>
               
@@ -521,14 +581,19 @@ export default function App() {
                 </button>
                 <span className="absolute top-5 left-5 text-slate-300"><RotateCcw size={20} className="group-hover:text-indigo-400 transition-colors" /></span>
                 
-                <h2 className="text-4xl sm:text-5xl font-extrabold text-slate-800 mb-3 tracking-tight">{currentCard.word}</h2>
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2">
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded" title="瀏覽次數"><Eye size={10}/> {cardStats.views}</span>
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="記得次數"><Check size={10}/> {cardStats.remembered}</span>
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="忘記次數"><X size={10}/> {cardStats.forgot}</span>
+                </div>
+
+                <h2 className="text-4xl sm:text-5xl font-extrabold text-slate-800 mb-3 tracking-tight mt-4">{currentCard.word}</h2>
                 <p className="text-lg text-slate-500 mb-8 font-mono">{currentCard.pronunciation}</p>
                 
                 <button onClick={(e) => speak(e, currentCard.word)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-2xl px-6 py-3 transition-transform hover:scale-105 active:scale-95 flex items-center gap-2 shadow-sm border border-indigo-100">
                   <Volume2 size={24} /> <span className="font-bold">發音</span>
                 </button>
                 
-                {/* 顯示下次複習時間 */}
                 {stats[currentCard.word]?.dueDate && (
                   <p className="absolute bottom-5 text-[11px] font-medium text-slate-400">
                     {stats[currentCard.word].dueDate < Date.now() ? <span className="text-rose-500">🔥 待複習</span> : `下次複習: ${new Date(stats[currentCard.word].dueDate).toLocaleDateString()}`}
@@ -598,19 +663,19 @@ export default function App() {
         {/* 底部導覽列 */}
         {activeDeck.length > 0 && (
           <div className="flex items-center justify-between bg-white rounded-2xl shadow-md p-2.5 border border-slate-100">
-            <button onClick={handlePrev} className="p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 rounded-xl transition-colors"><ChevronLeft size={20} /></button>
+            <button onClick={() => goPrev()} className="p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 rounded-xl transition-colors"><ChevronLeft size={20} /></button>
             <div className="text-center px-4 flex-1">
-              <div className="text-xs font-bold text-slate-600 tracking-wider mb-1.5">{currentIndex + 1} / {activeDeck.length}</div>
+              <div className="text-xs font-bold text-slate-600 tracking-wider mb-1.5">{safeIndex + 1} / {activeDeck.length}</div>
               <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden relative">
-                <div className={`absolute top-0 left-0 h-full transition-all duration-300 ${appMode === 'due' ? 'bg-rose-500' : appMode === 'quiz' ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${((currentIndex + 1) / activeDeck.length) * 100}%` }} />
+                <div className={`absolute top-0 left-0 h-full transition-all duration-300 ${appMode === 'due' ? 'bg-rose-500' : appMode === 'quiz' ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${((safeIndex + 1) / activeDeck.length) * 100}%` }} />
               </div>
             </div>
-            <button onClick={handleNext} className="p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 rounded-xl transition-colors"><ChevronRight size={20} /></button>
+            <button onClick={() => goNext()} className="p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 rounded-xl transition-colors"><ChevronRight size={20} /></button>
           </div>
         )}
       </div>
 
-      {/* 📊 遊戲化統計 Modal (含熱力圖) */}
+      {/* 📊 遊戲化統計 Modal */}
       {showStatsModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl flex flex-col border border-slate-100">
@@ -628,7 +693,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 近 14 天熱力圖 */}
             <div className="mb-5">
               <h3 className="text-xs font-bold text-slate-400 mb-2">近 14 天活躍度</h3>
               <div className="flex gap-1.5 justify-center">
@@ -645,15 +709,18 @@ export default function App() {
               </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-100 flex gap-2">
-              <div className="flex-1 text-center">
+            <div className="pt-4 border-t border-slate-100 grid grid-cols-3 gap-2">
+              <div className="text-center">
                 <p className="text-lg font-black text-slate-700">{originalDeck.length}</p>
                 <p className="text-[10px] font-bold text-slate-400">總字數</p>
               </div>
-              <div className="w-px bg-slate-100 my-1"></div>
-              <div className="flex-1 text-center">
-                <p className="text-lg font-black text-amber-500">{originalDeck.filter(c => stats[c.word]?.starred).length}</p>
-                <p className="text-[10px] font-bold text-slate-400">收藏字</p>
+              <div className="text-center">
+                <p className="text-lg font-black text-emerald-500">{totalRemembered}</p>
+                <p className="text-[10px] font-bold text-slate-400">總答對/熟悉</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-black text-rose-500">{totalForgot}</p>
+                <p className="text-[10px] font-bold text-slate-400">總答錯/重來</p>
               </div>
             </div>
             
@@ -666,7 +733,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🗄️ 資料庫管理 Modal (PDF/CSV) */}
+      {/* 🗄️ 資料庫管理 Modal */}
       {showDataModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl w-full max-w-2xl p-6 shadow-2xl flex flex-col h-[85vh] border border-slate-100 relative overflow-hidden">
