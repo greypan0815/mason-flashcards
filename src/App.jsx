@@ -1,25 +1,26 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered } from 'lucide-react';
 
-// 預設精選單字範例
+// 預設精選單字範例 (加入 level 與 root 預設空值)
 const defaultWordsList = [
-  "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|",
-  // "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|",
-  // "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit.|毀三觀之前是自信的",
-  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|",
-  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  // "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
+  "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
+  "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
+  "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit.|毀三觀之前是自信的||5",
+  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
+  "acerbic|[ə'sabık]|苦澀的、刻薄的|(adj.) tasting sour; harsh in language or temper|He instantly wished he could take back the acerbic comment.||acerb, acid, acri, acu尖、酸|3"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
-  const [word, pronunciation, meaning, englishDef, examplesStr, note] = str.split('|');
+  const [word, pronunciation, meaning, englishDef, examplesStr, note, root, level] = str.split('|');
   return {
     word, pronunciation, meaning, englishDef,
-    examples: examplesStr ? examplesStr.split('//').map(e => e.trim()).filter(Boolean) : [], note: note || ""
+    examples: examplesStr ? examplesStr.split('//').map(e => e.trim()).filter(Boolean) : [], 
+    note: note || "",
+    root: root || "",
+    level: level || ""
   };
 });
 
-// 格式化日期的輔助函數
 const getTodayStr = (dateObj = new Date()) => {
   return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
 };
@@ -29,7 +30,6 @@ export default function App() {
     try { const saved = localStorage.getItem('mason-deck'); return saved ? JSON.parse(saved) : initialVocabulary; } catch (e) { return initialVocabulary; }
   });
   
-  // App 模式新增了 'boss' (魔王字特訓)
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
@@ -52,8 +52,8 @@ export default function App() {
   const [showDataModal, setShowDataModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showBossModal, setShowBossModal] = useState(false);
-  const [bossN, setBossN] = useState(20); // 預設挑出前 20 個易忘字
-  const [bossDeckWords, setBossDeckWords] = useState([]); // 儲存當次生成的魔王字列表
+  const [bossN, setBossN] = useState(20);
+  const [bossDeckWords, setBossDeckWords] = useState([]); 
 
   const [importText, setImportText] = useState('');
   const [isPdfLoaded, setIsPdfLoaded] = useState(false);
@@ -63,7 +63,6 @@ export default function App() {
     try { const saved = localStorage.getItem('mason-stats'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
   });
 
-  // 🔥 修復與升級：Activity 儲存格式升級為 { count: 10, correct: 8, wrong: 2 }
   const [activity, setActivity] = useState(() => {
     try { const saved = localStorage.getItem('mason-activity'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
   });
@@ -112,9 +111,6 @@ export default function App() {
     } else if (appMode === 'starred') {
       filtered = originalDeck.filter(c => stats[c.word]?.starred);
     } else if (appMode === 'boss') {
-      // 魔王字特訓模式：只顯示當下挑出的 N 個字
-      // 🔥 修正：使用 bossDeckWords 已經排序好的陣列順序來建立 filtered
-      // 這樣使用者在特訓時，按鈕點擊更新 stats 不會導致牌組瘋狂重新排序而亂跳
       const bossMap = new Map(bossDeckWords.map((w, i) => [w, i]));
       filtered = originalDeck.filter(c => bossMap.has(c.word));
       filtered.sort((a, b) => bossMap.get(a.word) - bossMap.get(b.word));
@@ -137,12 +133,10 @@ export default function App() {
   const safeIndex = activeDeck.length > 0 ? Math.min(currentIndex, activeDeck.length - 1) : 0;
   const currentCard = activeDeck[safeIndex];
 
-  // 🔥 更新打卡紀錄格式，兼容舊版數字
   const logActivity = (isCorrect) => {
     const today = getTodayStr();
     setActivity(prev => {
       const prevData = prev[today] || { count: 0, correct: 0, wrong: 0 };
-      // 兼容舊版的數字格式，避免報錯
       const safeData = typeof prevData === 'number' ? { count: prevData, correct: prevData, wrong: 0 } : prevData;
       return {
         ...prev,
@@ -285,7 +279,6 @@ export default function App() {
     lastViewedRef.current = null;
   };
 
-  // 開啟魔王特訓模式
   const startBossMode = () => {
     const sortedWords = [...originalDeck]
       .map(card => {
@@ -294,8 +287,8 @@ export default function App() {
         const rate = total > 0 ? (st.forgot / total) : 0;
         return { word: card.word, forgot: st.forgot || 0, rate: rate };
       })
-      .filter(w => w.forgot > 0) // 必須至少忘記過一次
-      .sort((a, b) => b.forgot - a.forgot || b.rate - a.rate) // 忘記次數優先，其次是忘記率
+      .filter(w => w.forgot > 0) 
+      .sort((a, b) => b.forgot - a.forgot || b.rate - a.rate) 
       .slice(0, bossN)
       .map(w => w.word);
 
@@ -325,7 +318,6 @@ export default function App() {
     }
   }, [safeIndex, activeDeck, currentCard]);
 
-  // === 輔助計算函數 ===
   const getSafeTotal = (key) => {
     return Object.values(stats).reduce((acc, curr) => {
       if (typeof curr === 'object' && curr !== null && !isNaN(Number(curr[key]))) return acc + Number(curr[key]);
@@ -335,7 +327,7 @@ export default function App() {
 
   const getActivitySafeCount = (dateStr, key) => {
     const data = activity[dateStr];
-    if (typeof data === 'number') return key === 'count' || key === 'correct' ? data : 0; // 舊資料預設全對
+    if (typeof data === 'number') return key === 'count' || key === 'correct' ? data : 0;
     if (typeof data === 'object' && data !== null) return data[key] || 0;
     return 0;
   };
@@ -353,7 +345,6 @@ export default function App() {
   const todayTotalCount = getActivitySafeCount(getTodayStr(), 'count');
   const todayCorrectCount = getActivitySafeCount(getTodayStr(), 'correct');
 
-  // 計算近 7 天的圖表資料
   const chartData = useMemo(() => {
     const data = [];
     for (let i = 6; i >= 0; i--) {
@@ -369,7 +360,7 @@ export default function App() {
 
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
-  // === 解析與匯入匯出核心函數 ===
+  // === 🚀 核心升級：支援字根與 Level 的解析與匯入匯出 ===
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
       setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, starred: 0, boss: 0 });
@@ -384,13 +375,18 @@ export default function App() {
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i].trim();
       if (!line) continue;
-      if (line.includes('@gmail') || line.includes('Mason 1000') || /^\d+@/.test(line) || /^grey\.pan/.test(line) || line.includes('gmail.com')) continue;
+      if (line.includes('@gmail') || line.includes('Mason 1000') || line.includes('Mason 2000') || /^\d+@/.test(line) || /^grey\.pan/.test(line) || line.includes('gmail.com')) continue;
       if (line.match(/^---.*PAGE.*---$/i)) continue;
       
-      const wordMatch = line.match(/^(\d+)\s+([a-zA-Z-\s]+)$/);
+      // 🔥 升級 Regex：支援 1000單的數字前綴 (如 5) 與 2000單的字母前綴 (如 S, B, C)
+      const wordMatch = line.match(/^([a-zA-Z0-9]+)\s+([a-zA-Z-\s]+)$/);
       if (wordMatch) {
         if (activeCard && activeCard.word) newCards.push(activeCard);
-        activeCard = { word: wordMatch[2].trim(), pronunciation: "", meaning: "", englishDef: "", examples: [], note: "" };
+        activeCard = { 
+          level: wordMatch[1].trim(), // 儲存級別
+          word: wordMatch[2].trim(), 
+          pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", root: "" // 新增 root 欄位
+        };
         currentTag = 'pron'; continue;
       }
       if (!activeCard) continue;
@@ -399,6 +395,7 @@ export default function App() {
       else if (line.startsWith('[例]')) { currentTag = 'example'; activeCard.examples.push(line.substring(3).trim()); } 
       else if (line.startsWith('[英]')) { currentTag = 'english'; activeCard.englishDef += line.substring(3).trim() + " "; } 
       else if (line.startsWith('[記]')) { currentTag = 'note'; activeCard.note += line.substring(3).trim() + " "; } 
+      else if (line.startsWith('[字根]')) { currentTag = 'root'; activeCard.root += line.substring(4).trim() + " "; } // 🔥 解析字根
       else {
         if (currentTag === 'pron') activeCard.pronunciation += line;
         else if (currentTag === 'meaning') activeCard.meaning += line + " ";
@@ -408,12 +405,17 @@ export default function App() {
         }
         else if (currentTag === 'english') activeCard.englishDef += line + " ";
         else if (currentTag === 'note') activeCard.note += line + " ";
+        else if (currentTag === 'root') activeCard.root += line + " "; // 承接跨行的字根
       }
     }
     if (activeCard && activeCard.word) newCards.push(activeCard);
     newCards = newCards.map(c => {
       let cleanedExamples = []; c.examples.forEach(ex => { ex.split('//').forEach(part => { if (part.trim()) cleanedExamples.push(part.trim()); }); });
-      return { ...c, examples: cleanedExamples, meaning: c.meaning.trim(), englishDef: c.englishDef.trim(), note: c.note.trim(), pronunciation: c.pronunciation.replace(/\s+/g, '') };
+      return { 
+        ...c, 
+        examples: cleanedExamples, meaning: c.meaning.trim(), englishDef: c.englishDef.trim(), 
+        note: c.note.trim(), root: c.root.trim(), pronunciation: c.pronunciation.replace(/\s+/g, '') 
+      };
     });
     finalizeImport(newCards);
   };
@@ -473,7 +475,10 @@ export default function App() {
         if (r.length >= 3 && r[0].trim() !== '') {
           newCards.push({
             word: r[0], pronunciation: r[1] || "", meaning: r[2] || "", englishDef: r[3] || "",
-            examples: r[4] ? r[4].split('//').map(s=>s.trim()).filter(Boolean) : [], note: r[5] || ""
+            examples: r[4] ? r[4].split('//').map(s=>s.trim()).filter(Boolean) : [], 
+            note: r[5] || "",
+            root: r[6] || "", // 支援第7欄：字根
+            level: r[7] || "" // 支援第8欄：級別
           });
         }
       }
@@ -483,14 +488,19 @@ export default function App() {
   };
 
   const exportToCSV = () => {
-    let csvContent = "\uFEFF單字,音標,中文解釋,英英釋義,例句,記憶法\n";
+    // 🔥 擴充 CSV 欄位，增加字根與級別
+    let csvContent = "\uFEFF單字,音標,中文解釋,英英釋義,例句,記憶法,字根,級別\n";
     originalDeck.forEach(card => {
       const escapeCSV = (str) => `"${(str || '').replace(/"/g, '""')}"`;
-      const row = [escapeCSV(card.word), escapeCSV(card.pronunciation), escapeCSV(card.meaning), escapeCSV(card.englishDef), escapeCSV(card.examples.join(" // ")), escapeCSV(card.note)].join(",");
+      const row = [
+        escapeCSV(card.word), escapeCSV(card.pronunciation), escapeCSV(card.meaning), 
+        escapeCSV(card.englishDef), escapeCSV(card.examples.join(" // ")), escapeCSV(card.note),
+        escapeCSV(card.root), escapeCSV(card.level)
+      ].join(",");
       csvContent += row + "\n";
     });
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'Mason_1000_單字庫.csv';
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'Mason_單字庫.csv';
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -572,6 +582,14 @@ export default function App() {
               <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字記得次數"><Check size={10}/> {cardStats.remembered}</span>
               <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字忘記次數"><X size={10}/> {cardStats.forgot}</span>
             </div>
+            
+            {/* 等級標籤 */}
+            {currentCard.level && (
+              <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                Lv. {currentCard.level}
+              </span>
+            )}
+
             <div className="text-center mb-6 mt-4">
               <span className="text-emerald-600 text-xs font-bold tracking-widest uppercase bg-emerald-50 px-3 py-1 rounded-full">選擇正確的意思</span>
               <h2 className="text-4xl font-extrabold text-slate-800 mt-4 mb-1">{currentCard.word}</h2>
@@ -587,7 +605,7 @@ export default function App() {
                 )
               })}
             </div>
-            {quizResult && <div className={`absolute top-4 right-4 text-2xl animate-in zoom-in ${quizResult === 'correct' ? 'text-emerald-500' : 'text-rose-500'}`}>{quizResult === 'correct' ? '✅' : '❌'}</div>}
+            {quizResult && <div className={`absolute top-4 right-16 text-2xl animate-in zoom-in ${quizResult === 'correct' ? 'text-emerald-500' : 'text-rose-500'}`}>{quizResult === 'correct' ? '✅' : '❌'}</div>}
           </div>
         ) : (
           // 📚 翻轉卡片模式 UI
@@ -598,6 +616,14 @@ export default function App() {
               <div className={`absolute inset-0 backface-hidden bg-white rounded-3xl shadow-xl border flex flex-col items-center justify-center p-8 text-center overflow-hidden ${appMode === 'boss' ? 'border-rose-300 shadow-rose-100' : 'border-slate-100'}`}>
                 {appMode === 'boss' && <div className="absolute top-0 left-0 w-full h-1 bg-rose-500"></div>}
                 <button onClick={(e) => toggleStar(e, currentCard.word)} className={`absolute top-5 right-5 z-20 transition-all ${stats[currentCard.word]?.starred ? 'text-amber-400 fill-amber-400 drop-shadow-sm scale-110' : 'text-slate-300 hover:text-amber-300'}`}><Star size={24} /></button>
+                
+                {/* 🔥 新增：等級標籤 */}
+                {currentCard.level && (
+                  <span className="absolute top-6 right-14 text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 shadow-sm">
+                    Lv. {currentCard.level}
+                  </span>
+                )}
+
                 <span className="absolute top-5 left-5 text-slate-300"><RotateCcw size={20} className={`transition-colors ${appMode === 'boss' ? 'group-hover:text-rose-400' : 'group-hover:text-indigo-400'}`} /></span>
                 
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2">
@@ -632,6 +658,16 @@ export default function App() {
                     </div>
                     <button onClick={(e) => speak(e, currentCard.meaning, 'zh-TW')} className="mt-1 text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 rounded-full p-2"><Volume2 size={20} /></button>
                   </div>
+
+                  {/* 🔥 新增：字根字首專區 */}
+                  {currentCard.root && (
+                    <div className="mb-4 bg-purple-50 p-3 rounded-xl border border-purple-200 shadow-sm relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-1 h-full bg-purple-400"></div>
+                      <h4 className="text-[11px] uppercase tracking-wider text-purple-600 font-bold mb-1">🌱 字根字首</h4>
+                      <p className="text-sm text-purple-900 font-medium leading-relaxed pl-1">{currentCard.root}</p>
+                    </div>
+                  )}
+
                   {currentCard.note && (
                     <div className="mb-4 bg-amber-50 p-3 rounded-xl border border-amber-200 shadow-sm relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
@@ -685,7 +721,7 @@ export default function App() {
         )}
       </div>
 
-      {/* 📊 強化的遊戲化統計 Modal (含每日正確率與答題數) */}
+      {/* 📊 強化的遊戲化統計 Modal */}
       {showStatsModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl flex flex-col border border-slate-100 max-h-[85vh] overflow-y-auto custom-scrollbar">
@@ -694,7 +730,6 @@ export default function App() {
               <button onClick={() => setShowStatsModal(false)} className="text-slate-400 hover:bg-slate-100 p-1.5 rounded-full"><X size={20} /></button>
             </div>
             
-            {/* 今日與整體數據看板 */}
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="bg-indigo-50 p-4 rounded-2xl flex flex-col items-center justify-center text-center border border-indigo-100">
                 <span className="text-3xl font-black text-indigo-600 mb-1">{todayTotalCount}</span>
@@ -708,7 +743,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 📈 每日答題數與正確率曲線圖 */}
             <div className="mb-6 bg-slate-50 rounded-2xl p-4 border border-slate-100">
               <div className="flex justify-between items-end mb-2">
                 <h3 className="text-xs font-bold text-slate-500">近 7 天趨勢</h3>
@@ -719,22 +753,14 @@ export default function App() {
               </div>
               <div className="relative h-28 w-full mt-2">
                 <svg viewBox="0 0 100 100" className="w-full h-full overflow-visible preserve-3d" preserveAspectRatio="none">
-                  {/* Grid */}
                   <line x1="0" y1="50" x2="100" y2="50" stroke="#cbd5e1" strokeDasharray="2" strokeWidth="0.5" />
                   <line x1="0" y1="100" x2="100" y2="100" stroke="#cbd5e1" strokeWidth="0.5" />
-                  
-                  {/* 答題數曲線 (藍色) */}
                   <polyline fill="none" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" points={chartData.map((d, i) => `${(i / 6) * 100},${maxChartCount === 0 ? 100 : 100 - (d.count / maxChartCount) * 100}`).join(' ')} />
-                  
-                  {/* 正確率曲線 (橘色) */}
                   <polyline fill="none" stroke="#f97316" strokeWidth="2" strokeDasharray="3" strokeLinecap="round" strokeLinejoin="round" points={chartData.map((d, i) => `${(i / 6) * 100},${100 - d.rate}`).join(' ')} />
-                  
-                  {/* 資料點 (正確率) */}
                   {chartData.map((d, i) => (
                     <circle key={i} cx={(i / 6) * 100} cy={100 - d.rate} r="2.5" fill="#fff" stroke="#f97316" strokeWidth="1.5" />
                   ))}
                 </svg>
-                {/* X 軸標籤 */}
                 <div className="flex justify-between w-full mt-2 text-[9px] text-slate-400 font-medium px-1">
                   {chartData.map((d, i) => <span key={i}>{d.label}</span>)}
                 </div>
