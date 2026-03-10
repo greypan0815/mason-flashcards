@@ -113,9 +113,11 @@ export default function App() {
       filtered = originalDeck.filter(c => stats[c.word]?.starred);
     } else if (appMode === 'boss') {
       // 魔王字特訓模式：只顯示當下挑出的 N 個字
-      const bossSet = new Set(bossDeckWords);
-      filtered = originalDeck.filter(c => bossSet.has(c.word));
-      filtered.sort((a, b) => (stats[b.word]?.forgot || 0) - (stats[a.word]?.forgot || 0));
+      // 🔥 修正：使用 bossDeckWords 已經排序好的陣列順序來建立 filtered
+      // 這樣使用者在特訓時，按鈕點擊更新 stats 不會導致牌組瘋狂重新排序而亂跳
+      const bossMap = new Map(bossDeckWords.map((w, i) => [w, i]));
+      filtered = originalDeck.filter(c => bossMap.has(c.word));
+      filtered.sort((a, b) => bossMap.get(a.word) - bossMap.get(b.word));
     }
     
     if (isShuffled && appMode !== 'due' && appMode !== 'boss' && !searchQuery && shuffledWords.length > 0) {
