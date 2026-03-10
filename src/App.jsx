@@ -349,6 +349,7 @@ export default function App() {
   const totalForgot = getSafeTotal('forgot');
   const overallRate = (totalRemembered + totalForgot) > 0 ? Math.round((totalRemembered / (totalRemembered + totalForgot)) * 100) : 0;
   const todayTotalCount = getActivitySafeCount(getTodayStr(), 'count');
+  const todayCorrectCount = getActivitySafeCount(getTodayStr(), 'correct');
 
   // 計算近 7 天的圖表資料
   const chartData = useMemo(() => {
@@ -366,7 +367,7 @@ export default function App() {
 
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
-  // 解析與 CSV 功能...
+  // === 解析與匯入匯出核心函數 ===
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
       setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, starred: 0, boss: 0 });
@@ -682,7 +683,7 @@ export default function App() {
         )}
       </div>
 
-      {/* 📊 強化的遊戲化統計 Modal (含每日正確率曲線與整體率) */}
+      {/* 📊 強化的遊戲化統計 Modal (含每日正確率與答題數) */}
       {showStatsModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl flex flex-col border border-slate-100 max-h-[85vh] overflow-y-auto custom-scrollbar">
@@ -691,13 +692,16 @@ export default function App() {
               <button onClick={() => setShowStatsModal(false)} className="text-slate-400 hover:bg-slate-100 p-1.5 rounded-full"><X size={20} /></button>
             </div>
             
-            {/* 整體數據 */}
+            {/* 今日與整體數據看板 */}
             <div className="grid grid-cols-2 gap-3 mb-5">
               <div className="bg-indigo-50 p-4 rounded-2xl flex flex-col items-center justify-center text-center border border-indigo-100">
-                <span className="text-3xl font-black text-indigo-600 mb-1">{todayTotalCount}</span><span className="text-[11px] font-bold text-indigo-400">今日答題數</span>
+                <span className="text-3xl font-black text-indigo-600 mb-1">{todayTotalCount}</span>
+                <span className="text-[11px] font-bold text-indigo-500">今日總答題數</span>
+                <span className="text-[10px] text-indigo-400 mt-1">其中 {todayCorrectCount} 題答對</span>
               </div>
               <div className="bg-emerald-50 p-4 rounded-2xl flex flex-col items-center justify-center text-center border border-emerald-100 relative overflow-hidden">
-                <span className="text-3xl font-black text-emerald-600 mb-1">{overallRate}%</span><span className="text-[11px] font-bold text-emerald-500">歷史總正確率</span>
+                <span className="text-3xl font-black text-emerald-600 mb-1">{overallRate}%</span>
+                <span className="text-[11px] font-bold text-emerald-500">歷史總正確率</span>
                 <div className="absolute bottom-0 left-0 h-1 bg-emerald-400" style={{ width: `${overallRate}%` }}></div>
               </div>
             </div>
