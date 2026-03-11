@@ -41,23 +41,22 @@ const TranslatableWord = ({ word }) => {
   };
 
   return (
-    <span onClick={toggleTranslate} className="cursor-pointer border-b border-transparent hover:border-sky-300 hover:text-sky-600 transition-colors inline">
+    <span onClick={toggleTranslate} className="cursor-pointer border-b border-transparent hover:border-sky-300 hover:text-sky-600 transition-colors inline relative whitespace-nowrap">
       {word}
-      {loading && <Loader2 size={12} className="inline animate-spin text-sky-400 ml-0.5 mb-0.5" />}
+      {loading && <Loader2 size={12} className="inline animate-spin text-sky-400 ml-0.5 -mb-0.5" />}
       {translation && <span className="text-[13px] font-bold text-sky-600 bg-sky-50 px-1 py-0.5 rounded mx-1 shadow-sm">({translation})</span>}
     </span>
   );
 };
 
-
 // 預設精選單字範例
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
-  "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
-  "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
-  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
-  "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
+  // "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
+  // "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
+  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
+  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
+  // "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
@@ -97,7 +96,7 @@ export default function App() {
   const [quizResult, setQuizResult] = useState(null); 
   const [selectedQuizOption, setSelectedQuizOption] = useState(null);
 
-  // 🔥 填空模式整句翻譯狀態
+  // 填空模式翻譯狀態
   const [sentenceTranslation, setSentenceTranslation] = useState(null);
   const [isTranslatingSentence, setIsTranslatingSentence] = useState(false);
 
@@ -216,7 +215,7 @@ export default function App() {
   // 🔥 請求整句翻譯
   const handleTranslateSentence = async () => {
     if (sentenceTranslation) {
-      setSentenceTranslation(null); // 再按一次關閉
+      setSentenceTranslation(null);
       return;
     }
     const ex = currentCard.examples?.[0];
@@ -505,6 +504,14 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  const clearStats = () => {
+    if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
+      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
+      setShowStatsModal(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-2 sm:p-4 font-sans relative overflow-hidden">
       <style dangerouslySetInnerHTML={{__html: `
@@ -565,7 +572,7 @@ export default function App() {
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
             <p className="font-bold text-lg mb-2">這裡空空的</p>
-            <p className="text-sm">找不到符合條件的單字。如果你正在「待複習」模式，恭喜你今天任務達成！</p>
+            <p className="text-sm">找不到符合條件的單字。</p>
             {appMode === 'boss' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部</button>}
           </div>
         ) : appMode === 'quiz' && !searchQuery ? (
@@ -679,11 +686,10 @@ export default function App() {
                   const tokens = regex ? exampleSentence.split(regex) : [exampleSentence];
 
                   const renderTokens = tokens.map((token, index) => {
-                      // 這是被配對到的填空目標字
                       if (regex && index % 2 === 1) {
                           if (quizResult !== null) {
                               // 🔥 回答後還原正確答案，並加上底線與顏色
-                              return <span key={index} className="underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1">{token}</span>;
+                              return <span key={index} className="underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1 mx-1">{token}</span>;
                           } else {
                               return <span key={index} className="tracking-widest text-slate-400 font-bold mx-1">_______</span>;
                           }
@@ -693,11 +699,11 @@ export default function App() {
                           return subTokens.map((subToken, j) => {
                               if (!subToken) return null;
                               if (/[^\x00-\x7F]/.test(subToken)) {
-                                  return <HiddenChineseText key={`${index}-${j}`} text={subToken} />;
+                                  return <HiddenChineseText key={`cn-${index}-${j}`} text={subToken} />;
                               } else if (/^[a-zA-Z]+$/.test(subToken)) {
-                                  return <TranslatableWord key={`${index}-${j}`} word={subToken} />;
+                                  return <TranslatableWord key={`en-${index}-${j}`} word={subToken} />;
                               } else {
-                                  return <span key={`${index}-${j}`}>{subToken}</span>;
+                                  return <span key={`other-${index}-${j}`}>{subToken}</span>;
                               }
                           });
                       }
@@ -714,7 +720,7 @@ export default function App() {
                       );
                   }
 
-                  return renderTokens;
+                  return <span>{renderTokens}</span>;
                 })()}
               </div>
 
@@ -1014,4 +1020,3 @@ export default function App() {
     </div>
   );
 }
-
