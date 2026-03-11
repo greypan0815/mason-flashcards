@@ -1,25 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered, PenTool } from 'lucide-react';
+import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered, PenTool, Globe } from 'lucide-react';
 
 // === 獨立元件：中文智慧遮罩 ===
 const HiddenChineseText = ({ text }) => {
   const [revealed, setRevealed] = useState(false);
-
-  // 當題目切換時，自動把遮罩蓋回去
-  useEffect(() => {
-    setRevealed(false);
-  }, [text]);
-
+  useEffect(() => { setRevealed(false); }, [text]);
   return (
     <span
-      onClick={(e) => {
-        e.stopPropagation();
-        setRevealed((v) => !v);
-      }}
-      className={`cursor-pointer transition-all duration-300 rounded inline-block ${
-        revealed
-          ? 'text-slate-600 bg-slate-100 px-1'
-          : 'bg-slate-300 text-transparent select-none blur-[4px] px-1 hover:bg-slate-400'
+      onClick={(e) => { e.stopPropagation(); setRevealed((v) => !v); }}
+      className={`cursor-pointer transition-all duration-300 rounded mx-0.5 ${
+        revealed ? 'text-slate-600 bg-slate-100 px-1' : 'bg-slate-300 text-transparent select-none blur-[4px] px-1 hover:bg-slate-400'
       }`}
       title={revealed ? "點擊隱藏" : "點擊顯示中文翻譯"}
     >
@@ -28,21 +18,53 @@ const HiddenChineseText = ({ text }) => {
   );
 };
 
+// === 獨立元件：可點擊即時翻譯的英文字 ===
+const TranslatableWord = ({ word }) => {
+  const [translation, setTranslation] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const toggleTranslate = async (e) => {
+    e.stopPropagation();
+    if (translation) {
+      setTranslation(null); // 再按一次還原
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=${encodeURIComponent(word)}`);
+      const data = await res.json();
+      setTranslation(data[0].map(item => item[0]).join(''));
+    } catch (e) {
+      setTranslation("錯誤");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <span onClick={toggleTranslate} className="cursor-pointer border-b border-transparent hover:border-sky-300 hover:text-sky-600 transition-colors inline">
+      {word}
+      {loading && <Loader2 size={12} className="inline animate-spin text-sky-400 ml-0.5 mb-0.5" />}
+      {translation && <span className="text-[13px] font-bold text-sky-600 bg-sky-50 px-1 py-0.5 rounded mx-1 shadow-sm">({translation})</span>}
+    </span>
+  );
+};
+
+
 // 預設精選單字範例
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
-  // "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
-  // "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
-  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
-  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  // "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
+  "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
+  "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
+  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
+  "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
+  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
   const [word, pronunciation, meaning, englishDef, examplesStr, note, root, level] = str.split('|');
   return {
     word, pronunciation, meaning, englishDef,
-    examples: examplesStr ? examplesStr.split('//').map(e => e.trim()).filter(Boolean) : [], note: note || ""
+    examples: examplesStr ? examplesStr.split('//').map(e => e.trim()).filter(Boolean) : [], note: note || "", root: root || "", level: level || ""
   };
 });
 
@@ -75,6 +97,10 @@ export default function App() {
   const [quizResult, setQuizResult] = useState(null); 
   const [selectedQuizOption, setSelectedQuizOption] = useState(null);
 
+  // 🔥 填空模式整句翻譯狀態
+  const [sentenceTranslation, setSentenceTranslation] = useState(null);
+  const [isTranslatingSentence, setIsTranslatingSentence] = useState(false);
+
   const [showDataModal, setShowDataModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [showBossModal, setShowBossModal] = useState(false);
@@ -100,10 +126,7 @@ export default function App() {
   useEffect(() => {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
-    script.onload = () => {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-      setIsPdfLoaded(true);
-    };
+    script.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'; setIsPdfLoaded(true); };
     document.head.appendChild(script);
   }, []);
 
@@ -166,19 +189,16 @@ export default function App() {
       const safeData = typeof prevData === 'number' ? { count: prevData, correct: prevData, wrong: 0 } : prevData;
       return {
         ...prev,
-        [today]: {
-          count: safeData.count + 1,
-          correct: safeData.correct + (isCorrect ? 1 : 0),
-          wrong: safeData.wrong + (!isCorrect ? 1 : 0)
-        }
+        [today]: { count: safeData.count + 1, correct: safeData.correct + (isCorrect ? 1 : 0), wrong: safeData.wrong + (!isCorrect ? 1 : 0) }
       };
     });
   };
 
   useEffect(() => {
     if ((appMode === 'quiz' || appMode === 'cloze') && currentCard) {
-      setQuizResult(null);
+      setQuizResult(null); 
       setSelectedQuizOption(null);
+      setSentenceTranslation(null); // 切換題目時清空整句翻譯
       const wrongCards = [...originalDeck].filter(c => c.word !== currentCard.word).sort(() => 0.5 - Math.random()).slice(0, 3);
       const options = [currentCard, ...wrongCards].sort(() => 0.5 - Math.random());
       setQuizOptions(options);
@@ -190,18 +210,34 @@ export default function App() {
     const isCorrect = selectedWord === currentCard.word;
     setSelectedQuizOption(selectedWord);
     setQuizResult(isCorrect ? 'correct' : 'wrong');
-    
-    // 呼叫 SRS，若是答對 (isCorrect === true)，dueDate 會被推延至未來，
-    // 這就代表這單字會「自動從待複習頁籤中被移出」！
     handleSRS(isCorrect ? 3 : 0, true);
+  };
+
+  // 🔥 請求整句翻譯
+  const handleTranslateSentence = async () => {
+    if (sentenceTranslation) {
+      setSentenceTranslation(null); // 再按一次關閉
+      return;
+    }
+    const ex = currentCard.examples?.[0];
+    if (!ex) return;
+
+    setIsTranslatingSentence(true);
+    try {
+      const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=${encodeURIComponent(ex)}`);
+      const data = await res.json();
+      setSentenceTranslation(data[0].map(item => item[0]).join(''));
+    } catch(e) {
+      setSentenceTranslation("翻譯失敗，請檢查網路連線。");
+    }
+    setIsTranslatingSentence(false);
   };
 
   const speak = (e, text, lang = 'en-US') => {
     e.stopPropagation(); 
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel(); 
-      let cleanText = text;
-      if (lang === 'en-US') cleanText = text.replace(/[\u4e00-\u9fa5（）( )、，。：；！]/g, ' ').trim();
+      let cleanText = text.replace(/[\u4e00-\u9fa5（）( )、，。：；！]/g, ' ').trim();
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.lang = lang; utterance.rate = 0.85; 
       window.speechSynthesis.speak(utterance);
@@ -241,23 +277,15 @@ export default function App() {
     
     setStats(prev => {
       const s = prev[word] || { ease: 2.5, interval: 0, views: 0, remembered: 0, forgot: 0 };
-      let newEase = s.ease || 2.5;
-      let newInterval = s.interval || 0;
-      let newRemembered = s.remembered || 0;
-      let newForgot = s.forgot || 0;
+      let newEase = s.ease || 2.5; let newInterval = s.interval || 0;
+      let newRemembered = s.remembered || 0; let newForgot = s.forgot || 0;
 
-      if (quality === 0) {
-        newEase = Math.max(1.3, newEase - 0.2); newInterval = 0; 
-      } else if (quality === 1) {
-        newEase = Math.max(1.3, newEase - 0.15); newInterval = Math.max(1, newInterval * 1.2);
-      } else if (quality === 2) {
-        newInterval = newInterval === 0 ? 1 : newInterval * newEase;
-      } else if (quality === 3) {
-        newEase += 0.15; newInterval = newInterval === 0 ? 4 : newInterval * newEase * 1.3;
-      }
+      if (quality === 0) { newEase = Math.max(1.3, newEase - 0.2); newInterval = 0; } 
+      else if (quality === 1) { newEase = Math.max(1.3, newEase - 0.15); newInterval = Math.max(1, newInterval * 1.2); } 
+      else if (quality === 2) { newInterval = newInterval === 0 ? 1 : newInterval * newEase; } 
+      else if (quality === 3) { newEase += 0.15; newInterval = newInterval === 0 ? 4 : newInterval * newEase * 1.3; }
 
-      if (quality <= 1) newForgot += 1;
-      else newRemembered += 1;
+      if (quality <= 1) newForgot += 1; else newRemembered += 1;
 
       const dueDate = new Date();
       if (newInterval > 0) dueDate.setDate(dueDate.getDate() + Math.round(newInterval));
@@ -270,20 +298,14 @@ export default function App() {
     });
 
     logActivity(isCorrect);
-    
-    if (!fromQuiz) {
-      const isConsumed = (appMode === 'due'); 
-      goNext(isConsumed);
-    }
+    if (!fromQuiz) { const isConsumed = (appMode === 'due'); goNext(isConsumed); }
   };
 
   const getStreak = () => {
-    let streak = 0;
-    let d = new Date();
+    let streak = 0; let d = new Date();
     while (true) {
       const dateStr = getTodayStr(d);
-      if (activity[dateStr]) streak++;
-      else if (streak > 0 || dateStr !== getTodayStr()) break;
+      if (activity[dateStr]) streak++; else if (streak > 0 || dateStr !== getTodayStr()) break;
       d.setDate(d.getDate() - 1);
     }
     return streak;
@@ -292,9 +314,8 @@ export default function App() {
   const toggleShuffle = () => {
     if (appMode === 'quiz' || appMode === 'cloze') return; 
     setIsFlipped(false);
-    if (isShuffled) {
-      setIsShuffled(false);
-    } else {
+    if (isShuffled) { setIsShuffled(false); } 
+    else {
       const newShuffledWords = [...originalDeck].sort((a, b) => {
         const statA = stats[a.word] || { views: 0, forgot: 0 };
         const statB = stats[b.word] || { views: 0, forgot: 0 };
@@ -302,11 +323,9 @@ export default function App() {
         if (statA.forgot !== statB.forgot) return statB.forgot - statA.forgot;
         return Math.random() - 0.5;
       }).map(c => c.word);
-      setShuffledWords(newShuffledWords);
-      setIsShuffled(true);
+      setShuffledWords(newShuffledWords); setIsShuffled(true);
     }
-    updateCurrentIndex(0); 
-    lastViewedRef.current = null;
+    updateCurrentIndex(0); lastViewedRef.current = null;
   };
 
   const startBossMode = () => {
@@ -316,22 +335,12 @@ export default function App() {
         const total = (st.forgot || 0) + (st.remembered || 0);
         const rate = total > 0 ? (st.forgot / total) : 0;
         return { word: card.word, forgot: st.forgot || 0, rate: rate };
-      })
-      .filter(w => w.forgot > 0) 
-      .sort((a, b) => b.forgot - a.forgot || b.rate - a.rate) 
-      .slice(0, bossN)
-      .map(w => w.word);
+      }).filter(w => w.forgot > 0).sort((a, b) => b.forgot - a.forgot || b.rate - a.rate).slice(0, bossN).map(w => w.word);
 
-    if (sortedWords.length === 0) {
-      alert("🎉 您目前沒有忘記過的單字！繼續保持！");
-      return;
-    }
+    if (sortedWords.length === 0) { alert("🎉 您目前沒有忘記過的單字！繼續保持！"); return; }
     
-    setBossDeckWords(sortedWords);
-    setAppMode('boss');
-    setSearchQuery('');
-    setIndexes(prev => ({ ...prev, boss: 0 }));
-    setShowBossModal(false);
+    setBossDeckWords(sortedWords); setAppMode('boss'); setSearchQuery('');
+    setIndexes(prev => ({ ...prev, boss: 0 })); setShowBossModal(false);
   };
 
   useEffect(() => {
@@ -348,24 +357,14 @@ export default function App() {
     }
   }, [safeIndex, activeDeck, currentCard]);
 
-  const getSafeTotal = (key) => {
-    return Object.values(stats).reduce((acc, curr) => {
-      if (typeof curr === 'object' && curr !== null && !isNaN(Number(curr[key]))) return acc + Number(curr[key]);
-      return acc;
-    }, 0);
-  };
-
+  const getSafeTotal = (key) => Object.values(stats).reduce((acc, curr) => (typeof curr === 'object' && curr !== null && !isNaN(Number(curr[key]))) ? acc + Number(curr[key]) : acc, 0);
   const getActivitySafeCount = (dateStr, key) => {
     const data = activity[dateStr];
     if (typeof data === 'number') return key === 'count' || key === 'correct' ? data : 0;
     if (typeof data === 'object' && data !== null) return data[key] || 0;
     return 0;
   };
-
-  const getDueCount = () => {
-    const now = Date.now();
-    return originalDeck.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= now).length;
-  };
+  const getDueCount = () => originalDeck.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= Date.now()).length;
 
   const cardStats = stats[currentCard?.word] || { views: 0, remembered: 0, forgot: 0 };
   const totalStudied = Object.keys(stats).length;
@@ -379,15 +378,12 @@ export default function App() {
     const data = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(); d.setDate(d.getDate() - i);
-      const dateStr = getTodayStr(d);
-      const count = getActivitySafeCount(dateStr, 'count');
-      const correct = getActivitySafeCount(dateStr, 'correct');
-      const rate = count > 0 ? Math.round((correct / count) * 100) : 0;
-      data.push({ label: `${d.getMonth()+1}/${d.getDate()}`, count, rate });
+      const count = getActivitySafeCount(getTodayStr(d), 'count');
+      const correct = getActivitySafeCount(getTodayStr(d), 'correct');
+      data.push({ label: `${d.getMonth()+1}/${d.getDate()}`, count, rate: count > 0 ? Math.round((correct / count) * 100) : 0 });
     }
     return data;
   }, [activity]);
-
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
   const finalizeImport = (newCards) => {
@@ -410,10 +406,7 @@ export default function App() {
       const wordMatch = line.match(/^([a-zA-Z0-9]+)\s+([a-zA-Z-\s]+)$/);
       if (wordMatch) {
         if (activeCard && activeCard.word) newCards.push(activeCard);
-        activeCard = { 
-          level: wordMatch[1].trim(), word: wordMatch[2].trim(), 
-          pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", root: ""
-        };
+        activeCard = { level: wordMatch[1].trim(), word: wordMatch[2].trim(), pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", root: "" };
         currentTag = 'pron'; continue;
       }
       if (!activeCard) continue;
@@ -426,10 +419,7 @@ export default function App() {
       else {
         if (currentTag === 'pron') activeCard.pronunciation += line;
         else if (currentTag === 'meaning') activeCard.meaning += line + " ";
-        else if (currentTag === 'example') {
-          if (activeCard.examples.length > 0) activeCard.examples[activeCard.examples.length - 1] += " " + line;
-          else activeCard.examples.push(line);
-        }
+        else if (currentTag === 'example') { if (activeCard.examples.length > 0) activeCard.examples[activeCard.examples.length - 1] += " " + line; else activeCard.examples.push(line); }
         else if (currentTag === 'english') activeCard.englishDef += line + " ";
         else if (currentTag === 'note') activeCard.note += line + " ";
         else if (currentTag === 'root') activeCard.root += line + " ";
@@ -438,10 +428,7 @@ export default function App() {
     if (activeCard && activeCard.word) newCards.push(activeCard);
     newCards = newCards.map(c => {
       let cleanedExamples = []; c.examples.forEach(ex => { ex.split('//').forEach(part => { if (part.trim()) cleanedExamples.push(part.trim()); }); });
-      return { 
-        ...c, examples: cleanedExamples, meaning: c.meaning.trim(), englishDef: c.englishDef.trim(), 
-        note: c.note.trim(), root: c.root.trim(), pronunciation: c.pronunciation.replace(/\s+/g, '') 
-      };
+      return { ...c, examples: cleanedExamples, meaning: c.meaning.trim(), englishDef: c.englishDef.trim(), note: c.note.trim(), root: c.root.trim(), pronunciation: c.pronunciation.replace(/\s+/g, '') };
     });
     finalizeImport(newCards);
   };
@@ -480,17 +467,13 @@ export default function App() {
       for (let i = 0; i < text.length; i++) {
         const char = text[i];
         if (inQuotes) {
-          if (char === '"' && text[i + 1] === '"') { currentString += '"'; i++; } 
-          else if (char === '"') { inQuotes = false; } 
-          else { currentString += char; }
+          if (char === '"' && text[i + 1] === '"') { currentString += '"'; i++; } else if (char === '"') { inQuotes = false; } else { currentString += char; }
         } else {
-          if (char === '"') { inQuotes = true; } 
-          else if (char === ',') { row.push(currentString); currentString = ''; } 
+          if (char === '"') { inQuotes = true; } else if (char === ',') { row.push(currentString); currentString = ''; } 
           else if (char === '\n' || char === '\r') {
             if (char === '\r' && text[i + 1] === '\n') i++; 
             row.push(currentString); rows.push(row); row = []; currentString = '';
-          } 
-          else { currentString += char; }
+          } else { currentString += char; }
         }
       }
       if (currentString || row.length > 0) { row.push(currentString); rows.push(row); }
@@ -501,8 +484,7 @@ export default function App() {
         if (r.length >= 3 && r[0].trim() !== '') {
           newCards.push({
             word: r[0], pronunciation: r[1] || "", meaning: r[2] || "", englishDef: r[3] || "",
-            examples: r[4] ? r[4].split('//').map(s=>s.trim()).filter(Boolean) : [], note: r[5] || "",
-            root: r[6] || "", level: r[7] || ""
+            examples: r[4] ? r[4].split('//').map(s=>s.trim()).filter(Boolean) : [], note: r[5] || "", root: r[6] || "", level: r[7] || ""
           });
         }
       }
@@ -515,24 +497,12 @@ export default function App() {
     let csvContent = "\uFEFF單字,音標,中文解釋,英英釋義,例句,記憶法,字根,級別\n";
     originalDeck.forEach(card => {
       const escapeCSV = (str) => `"${(str || '').replace(/"/g, '""')}"`;
-      const row = [
-        escapeCSV(card.word), escapeCSV(card.pronunciation), escapeCSV(card.meaning), 
-        escapeCSV(card.englishDef), escapeCSV(card.examples.join(" // ")), escapeCSV(card.note),
-        escapeCSV(card.root), escapeCSV(card.level)
-      ].join(",");
+      const row = [escapeCSV(card.word), escapeCSV(card.pronunciation), escapeCSV(card.meaning), escapeCSV(card.englishDef), escapeCSV(card.examples.join(" // ")), escapeCSV(card.note), escapeCSV(card.root), escapeCSV(card.level)].join(",");
       csvContent += row + "\n";
     });
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'Mason_單字庫.csv';
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  };
-
-  const clearStats = () => {
-    if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
-      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-      localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
-      setShowStatsModal(false);
-    }
   };
 
   return (
@@ -608,9 +578,7 @@ export default function App() {
             </div>
             
             {currentCard.level && (
-              <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
-                Lv. {currentCard.level}
-              </span>
+              <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">Lv. {currentCard.level}</span>
             )}
 
             <div className="text-center mb-6 mt-4">
@@ -622,29 +590,32 @@ export default function App() {
             <div className="space-y-3 flex-1 flex flex-col justify-center">
               {quizOptions.map((opt, i) => {
                 let btnStyle = "bg-slate-50 border-slate-200 text-slate-700 hover:bg-emerald-50 hover:border-emerald-200";
-                if (quizResult) {
+                let subTextClass = "hidden";
+                
+                if (quizResult !== null) {
+                  subTextClass = "text-sm mt-1 block font-bold";
                   if (opt.word === currentCard.word) {
-                    btnStyle = "bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-200 scale-[1.02] z-10"; 
+                    btnStyle = "bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-200 scale-[1.02] z-10";
+                    subTextClass += " text-emerald-100";
                   } else if (opt.word === selectedQuizOption) {
-                    btnStyle = "bg-rose-500 border-rose-600 text-white shadow-md shadow-rose-200 scale-[1.02] z-10"; 
+                    btnStyle = "bg-rose-500 border-rose-600 text-white shadow-md shadow-rose-200 scale-[1.02] z-10";
+                    subTextClass += " text-rose-100";
                   } else {
-                    btnStyle = "bg-slate-50 border-slate-200 text-slate-300 opacity-50"; 
+                    btnStyle = "bg-slate-50 border-slate-200 text-slate-400 opacity-60";
+                    subTextClass += " text-slate-400";
                   }
                 }
                 return (
-                  <button key={i} onClick={() => handleQuizAnswer(opt.word)} disabled={quizResult !== null} className={`w-full text-left px-5 py-4 rounded-2xl border-2 font-medium transition-all duration-300 ${btnStyle}`}>{opt.meaning}</button>
+                  <button key={i} onClick={() => handleQuizAnswer(opt.word)} disabled={quizResult !== null} className={`w-full flex flex-col items-center justify-center px-5 py-4 rounded-2xl border-2 transition-all duration-300 ${btnStyle}`}>
+                    <span className="font-bold text-lg">{opt.meaning}</span>
+                    <span className={subTextClass}>{opt.word}</span>
+                  </button>
                 )
               })}
             </div>
             
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
-                <div className="text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
-                  <p className="text-xs font-bold text-slate-400 mb-1">
-                    {quizResult === 'correct' ? '🎉 太棒了，你答對了！' : '❌ 答錯囉，請記住以下解釋：'}
-                  </p>
-                  <p className="text-lg font-bold text-emerald-600">{currentCard.meaning}</p>
-                </div>
                 <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
                   下一題 <ChevronRight size={20} />
                 </button>
@@ -662,88 +633,129 @@ export default function App() {
             </div>
 
             {currentCard.level && (
-              <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
-                Lv. {currentCard.level}
-              </span>
+              <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">Lv. {currentCard.level}</span>
             )}
 
             <div className="text-center mb-4 mt-4">
-              <span className="text-sky-600 text-xs font-bold tracking-widest uppercase bg-sky-50 px-3 py-1 rounded-full">依語境選擇單字</span>
+              <div className="flex justify-between items-center mb-4 mt-2 px-1">
+                <span className="text-sky-600 text-xs font-bold tracking-widest uppercase bg-sky-50 px-3 py-1 rounded-full">依語境選擇單字</span>
+                
+                {/* 🌐 整句翻譯按鈕 */}
+                <button 
+                  onClick={handleTranslateSentence} 
+                  className="text-slate-400 hover:text-sky-500 bg-slate-50 hover:bg-sky-50 p-2 rounded-full transition-colors flex items-center gap-1"
+                  title="翻譯整句"
+                >
+                  {isTranslatingSentence ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />}
+                  <span className="text-[10px] font-bold">{sentenceTranslation ? '隱藏' : '翻譯'}</span>
+                </button>
+              </div>
               
-              {/* 🔥 智慧挖空例句與中文遮罩 */}
-              <div className="mt-6 mb-2 text-lg font-medium text-slate-700 leading-relaxed px-2 text-left">
+              {/* 🔥 智慧挖空例句、中文遮罩與可點擊翻譯的單字 */}
+              <div className="mt-2 mb-2 text-[17px] font-medium text-slate-700 leading-relaxed px-2 text-left">
                 {(() => {
                   const exampleSentence = currentCard.examples && currentCard.examples.length > 0 ? currentCard.examples[0] : "";
                   
-                  // 沒有例句時，直接顯示提示 (這裡不需要打馬賽克，否則無從猜起)
                   if (exampleSentence.length === 0) {
                       return <span className="whitespace-pre-wrap">{`(此單字無例句，請根據下方字義選擇單字)\n「${currentCard.meaning}」`}</span>;
                   }
 
-                  let blankedSentence = exampleSentence;
-                  const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                  let regex = new RegExp(`\\b${escapeRegExp(currentCard.word)}\\b`, 'gi');
-                  if (!regex.test(blankedSentence)) regex = new RegExp(escapeRegExp(currentCard.word), 'gi'); 
-                  if (!regex.test(blankedSentence) && currentCard.word.length > 4) {
-                     const stem = currentCard.word.slice(0, -2);
-                     regex = new RegExp(`\\b${escapeRegExp(stem)}\\w*\\b`, 'gi');
-                  }
-                  blankedSentence = blankedSentence.replace(regex, '_______');
-                  
-                  if (blankedSentence === exampleSentence) {
-                      blankedSentence += " (______)";
+                  // 找出要挖空的部分
+                  const getClozeRegex = (word, sentence) => {
+                      const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                      let r = new RegExp(`(\\b${escaped}\\b)`, 'gi');
+                      if (r.test(sentence)) return r;
+                      r = new RegExp(`(${escaped})`, 'gi');
+                      if (r.test(sentence)) return r;
+                      if (word.length > 4) {
+                          const stem = escaped.slice(0, -2);
+                          r = new RegExp(`(\\b${stem}\\w*\\b)`, 'gi');
+                          if (r.test(sentence)) return r;
+                      }
+                      return null;
+                  };
+
+                  const regex = getClozeRegex(currentCard.word, exampleSentence);
+                  const tokens = regex ? exampleSentence.split(regex) : [exampleSentence];
+
+                  const renderTokens = tokens.map((token, index) => {
+                      // 這是被配對到的填空目標字
+                      if (regex && index % 2 === 1) {
+                          if (quizResult !== null) {
+                              // 🔥 回答後還原正確答案，並加上底線與顏色
+                              return <span key={index} className="underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1">{token}</span>;
+                          } else {
+                              return <span key={index} className="tracking-widest text-slate-400 font-bold mx-1">_______</span>;
+                          }
+                      } else {
+                          // 正常句子區塊，切割成中文、英文單字與標點
+                          const subTokens = token.split(/([a-zA-Z]+|[^\x00-\x7F]+)/g);
+                          return subTokens.map((subToken, j) => {
+                              if (!subToken) return null;
+                              if (/[^\x00-\x7F]/.test(subToken)) {
+                                  return <HiddenChineseText key={`${index}-${j}`} text={subToken} />;
+                              } else if (/^[a-zA-Z]+$/.test(subToken)) {
+                                  return <TranslatableWord key={`${index}-${j}`} word={subToken} />;
+                              } else {
+                                  return <span key={`${index}-${j}`}>{subToken}</span>;
+                              }
+                          });
+                      }
+                  });
+
+                  if (!regex) {
+                      return (
+                          <span>
+                              {renderTokens}
+                              {quizResult !== null 
+                                  ? <span className="ml-1 underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1">({currentCard.word})</span>
+                                  : <span className="ml-1 tracking-widest text-slate-400 font-bold"> (______)</span>}
+                          </span>
+                      );
                   }
 
-                  // 利用正則表達式，找出所有的中文與全形標點符號區塊
-                  const parts = blankedSentence.split(/([^\x00-\x7F]+)/g);
-                  return parts.map((part, i) => {
-                      if (/[^\x00-\x7F]/.test(part)) {
-                          return <HiddenChineseText key={i} text={part} />;
-                      }
-                      return <span key={i}>{part}</span>;
-                  });
+                  return renderTokens;
                 })()}
               </div>
+
+              {/* 整句翻譯的顯示區塊 */}
+              {sentenceTranslation && (
+                <div className="mt-3 p-3 bg-sky-50 text-sky-800 text-sm font-medium rounded-xl border border-sky-100 animate-in fade-in slide-in-from-top-2 text-left">
+                  {sentenceTranslation}
+                </div>
+              )}
             </div>
 
-            <div className="space-y-3 flex-1 flex flex-col justify-center">
+            <div className="space-y-3 flex-1 flex flex-col justify-center mt-4">
               {quizOptions.map((opt, i) => {
                 let btnStyle = "bg-slate-50 border-slate-200 text-slate-700 hover:bg-sky-50 hover:border-sky-200";
-                if (quizResult) {
+                let subTextClass = "hidden";
+
+                if (quizResult !== null) {
+                  subTextClass = "text-sm mt-1 block font-bold";
                   if (opt.word === currentCard.word) {
                     btnStyle = "bg-sky-500 border-sky-600 text-white shadow-md shadow-sky-200 scale-[1.02] z-10";
+                    subTextClass += " text-sky-100";
                   } else if (opt.word === selectedQuizOption) {
                     btnStyle = "bg-rose-500 border-rose-600 text-white shadow-md shadow-rose-200 scale-[1.02] z-10";
+                    subTextClass += " text-rose-100";
                   } else {
-                    btnStyle = "bg-slate-50 border-slate-200 text-slate-300 opacity-50";
+                    btnStyle = "bg-slate-50 border-slate-200 text-slate-400 opacity-60";
+                    subTextClass += " text-slate-400";
                   }
                 }
                 return (
-                  <button 
-                    key={i} 
-                    onClick={() => handleQuizAnswer(opt.word)}
-                    disabled={quizResult !== null}
-                    className={`w-full text-center px-5 py-3 rounded-2xl border-2 font-bold text-lg transition-all duration-300 ${btnStyle}`}
-                  >
-                    {opt.word}
+                  <button key={i} onClick={() => handleQuizAnswer(opt.word)} disabled={quizResult !== null} className={`w-full flex flex-col items-center justify-center px-5 py-3 rounded-2xl border-2 transition-all duration-300 ${btnStyle}`}>
+                    <span className="font-bold text-lg">{opt.word}</span>
+                    <span className={subTextClass}>{opt.meaning}</span>
                   </button>
                 )
               })}
             </div>
 
-            {/* 填空解析與下一題按鈕 */}
+            {/* 填空手動下一題按鈕 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
-                <div className="text-center bg-sky-50 p-4 rounded-xl border border-sky-100">
-                  <p className="text-xs font-bold text-slate-400 mb-2">
-                    {quizResult === 'correct' ? '🎉 答對了！' : '❌ 答錯了，請確認正確用法：'}
-                  </p>
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="text-sky-700 font-extrabold text-xl">{currentCard.word}</span>
-                    <button onClick={(e) => speak(e, currentCard.word)} className="bg-white text-sky-500 hover:bg-sky-100 p-1.5 rounded-full shadow-sm transition-colors"><Volume2 size={16}/></button>
-                  </div>
-                  <p className="text-sm font-medium text-slate-700 mt-2">{currentCard.meaning}</p>
-                </div>
                 <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
                   下一題 <ChevronRight size={20} />
                 </button>
@@ -1002,3 +1014,4 @@ export default function App() {
     </div>
   );
 }
+
