@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered } from 'lucide-react';
+import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered, PenTool } from 'lucide-react';
 
-// 預設精選單字範例 (加入 level 與 root 預設空值)
+// 預設精選單字範例
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
-  "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
-  "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit.|毀三觀之前是自信的||5",
-  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
-  "acerbic|[ə'sabık]|苦澀的、刻薄的|(adj.) tasting sour; harsh in language or temper|He instantly wished he could take back the acerbic comment.||acerb, acid, acri, acu尖、酸|3"
+  // "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
+  // "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit.|毀三觀之前是自信的||5",
+  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
+  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
+  // "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
   const [word, pronunciation, meaning, englishDef, examplesStr, note, root, level] = str.split('|');
   return {
     word, pronunciation, meaning, englishDef,
-    examples: examplesStr ? examplesStr.split('//').map(e => e.trim()).filter(Boolean) : [], 
-    note: note || "",
-    root: root || "",
-    level: level || ""
+    examples: examplesStr ? examplesStr.split('//').map(e => e.trim()).filter(Boolean) : [], note: note || ""
   };
 });
 
@@ -33,8 +31,8 @@ export default function App() {
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, starred: 0, boss: 0 }; }
-    catch { return { study: 0, due: 0, quiz: 0, starred: 0, boss: 0 }; }
+    try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
+    catch { return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
   });
 
   const [isShuffled, setIsShuffled] = useState(() => localStorage.getItem('mason-isShuffled') === 'true');
@@ -48,6 +46,7 @@ export default function App() {
 
   const [quizOptions, setQuizOptions] = useState([]);
   const [quizResult, setQuizResult] = useState(null); 
+  const [selectedQuizOption, setSelectedQuizOption] = useState(null); // 🔥 新增：記錄使用者點選了哪個選項
 
   const [showDataModal, setShowDataModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
@@ -150,20 +149,23 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (appMode === 'quiz' && currentCard) {
+    if ((appMode === 'quiz' || appMode === 'cloze') && currentCard) {
       setQuizResult(null);
+      setSelectedQuizOption(null); // 換題時重置選擇狀態
       const wrongCards = [...originalDeck].filter(c => c.word !== currentCard.word).sort(() => 0.5 - Math.random()).slice(0, 3);
       const options = [currentCard, ...wrongCards].sort(() => 0.5 - Math.random());
       setQuizOptions(options);
     }
   }, [appMode, safeIndex, currentCard, originalDeck]);
 
+  // 🔥 測驗模式取消自動跳轉
   const handleQuizAnswer = (selectedWord) => {
     if (quizResult) return; 
     const isCorrect = selectedWord === currentCard.word;
+    setSelectedQuizOption(selectedWord);
     setQuizResult(isCorrect ? 'correct' : 'wrong');
     handleSRS(isCorrect ? 3 : 0, true);
-    setTimeout(() => { goNext(false); }, 1200);
+    // 不再使用 setTimeout 自動跳轉，等待使用者點擊「下一題」按鈕
   };
 
   const speak = (e, text, lang = 'en-US') => {
@@ -260,7 +262,7 @@ export default function App() {
   };
 
   const toggleShuffle = () => {
-    if (appMode === 'quiz') return; 
+    if (appMode === 'quiz' || appMode === 'cloze') return; 
     setIsFlipped(false);
     if (isShuffled) {
       setIsShuffled(false);
@@ -360,10 +362,9 @@ export default function App() {
 
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
-  // === 🚀 核心升級：支援字根與 Level 的解析與匯入匯出 ===
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
-      setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, starred: 0, boss: 0 });
+      setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
       setSearchQuery(''); setImportText(''); setShowDataModal(false);
       alert(`🎉 完美解析！成功匯入 ${newCards.length} 個單字。`);
     } else alert("找不到可解析的單字，請確認文本格式。");
@@ -378,14 +379,12 @@ export default function App() {
       if (line.includes('@gmail') || line.includes('Mason 1000') || line.includes('Mason 2000') || /^\d+@/.test(line) || /^grey\.pan/.test(line) || line.includes('gmail.com')) continue;
       if (line.match(/^---.*PAGE.*---$/i)) continue;
       
-      // 🔥 升級 Regex：支援 1000單的數字前綴 (如 5) 與 2000單的字母前綴 (如 S, B, C)
       const wordMatch = line.match(/^([a-zA-Z0-9]+)\s+([a-zA-Z-\s]+)$/);
       if (wordMatch) {
         if (activeCard && activeCard.word) newCards.push(activeCard);
         activeCard = { 
-          level: wordMatch[1].trim(), // 儲存級別
-          word: wordMatch[2].trim(), 
-          pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", root: "" // 新增 root 欄位
+          level: wordMatch[1].trim(), word: wordMatch[2].trim(), 
+          pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", root: ""
         };
         currentTag = 'pron'; continue;
       }
@@ -395,7 +394,7 @@ export default function App() {
       else if (line.startsWith('[例]')) { currentTag = 'example'; activeCard.examples.push(line.substring(3).trim()); } 
       else if (line.startsWith('[英]')) { currentTag = 'english'; activeCard.englishDef += line.substring(3).trim() + " "; } 
       else if (line.startsWith('[記]')) { currentTag = 'note'; activeCard.note += line.substring(3).trim() + " "; } 
-      else if (line.startsWith('[字根]')) { currentTag = 'root'; activeCard.root += line.substring(4).trim() + " "; } // 🔥 解析字根
+      else if (line.startsWith('[字根]')) { currentTag = 'root'; activeCard.root += line.substring(4).trim() + " "; }
       else {
         if (currentTag === 'pron') activeCard.pronunciation += line;
         else if (currentTag === 'meaning') activeCard.meaning += line + " ";
@@ -405,15 +404,14 @@ export default function App() {
         }
         else if (currentTag === 'english') activeCard.englishDef += line + " ";
         else if (currentTag === 'note') activeCard.note += line + " ";
-        else if (currentTag === 'root') activeCard.root += line + " "; // 承接跨行的字根
+        else if (currentTag === 'root') activeCard.root += line + " ";
       }
     }
     if (activeCard && activeCard.word) newCards.push(activeCard);
     newCards = newCards.map(c => {
       let cleanedExamples = []; c.examples.forEach(ex => { ex.split('//').forEach(part => { if (part.trim()) cleanedExamples.push(part.trim()); }); });
       return { 
-        ...c, 
-        examples: cleanedExamples, meaning: c.meaning.trim(), englishDef: c.englishDef.trim(), 
+        ...c, examples: cleanedExamples, meaning: c.meaning.trim(), englishDef: c.englishDef.trim(), 
         note: c.note.trim(), root: c.root.trim(), pronunciation: c.pronunciation.replace(/\s+/g, '') 
       };
     });
@@ -475,10 +473,8 @@ export default function App() {
         if (r.length >= 3 && r[0].trim() !== '') {
           newCards.push({
             word: r[0], pronunciation: r[1] || "", meaning: r[2] || "", englishDef: r[3] || "",
-            examples: r[4] ? r[4].split('//').map(s=>s.trim()).filter(Boolean) : [], 
-            note: r[5] || "",
-            root: r[6] || "", // 支援第7欄：字根
-            level: r[7] || "" // 支援第8欄：級別
+            examples: r[4] ? r[4].split('//').map(s=>s.trim()).filter(Boolean) : [], note: r[5] || "",
+            root: r[6] || "", level: r[7] || ""
           });
         }
       }
@@ -488,7 +484,6 @@ export default function App() {
   };
 
   const exportToCSV = () => {
-    // 🔥 擴充 CSV 欄位，增加字根與級別
     let csvContent = "\uFEFF單字,音標,中文解釋,英英釋義,例句,記憶法,字根,級別\n";
     originalDeck.forEach(card => {
       const escapeCSV = (str) => `"${(str || '').replace(/"/g, '""')}"`;
@@ -506,20 +501,20 @@ export default function App() {
 
   const clearStats = () => {
     if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
-      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, starred: 0, boss: 0 });
+      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
       localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
       setShowStatsModal(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-2 sm:p-4 font-sans relative overflow-hidden">
       <style dangerouslySetInnerHTML={{__html: `
         .perspective-1000 { perspective: 1000px; }
         .transform-style-3d { transform-style: preserve-3d; }
         .backface-hidden { backface-visibility: hidden; }
         .rotate-y-180 { transform: rotateY(180deg); }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar { height: 4px; width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
@@ -527,7 +522,6 @@ export default function App() {
 
       <div className="w-full max-w-md relative z-10">
         
-        {/* Header 頂部列 */}
         <div className="flex justify-between items-center mb-3 px-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-indigo-700 tracking-wider">M1K</h1>
@@ -542,7 +536,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 搜尋與模式切換列 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-2 mb-4">
           <div className="relative mb-2 flex gap-2">
             <div className="relative flex-1">
@@ -555,18 +548,18 @@ export default function App() {
             </button>
           </div>
           
-          <div className="flex gap-1">
-            <button onClick={() => {setAppMode('study'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'study' && !searchQuery ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>📚 全部</button>
-            <button onClick={() => {setAppMode('due'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors relative ${appMode === 'due' && !searchQuery ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <div className="flex gap-1 overflow-x-auto custom-scrollbar pb-1">
+            <button onClick={() => {setAppMode('study'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'study' && !searchQuery ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>📚 全部</button>
+            <button onClick={() => {setAppMode('due'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap relative ${appMode === 'due' && !searchQuery ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
               <CalendarCheck size={14} className="inline mr-1" /> 待複習
               {getDueCount() > 0 && <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center animate-bounce">{getDueCount()}</span>}
             </button>
-            <button onClick={() => {setAppMode('quiz'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'quiz' && !searchQuery ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Gamepad2 size={14} className="inline mr-1" /> 測驗</button>
-            <button onClick={() => {setAppMode('starred'); setSearchQuery('');}} className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${appMode === 'starred' && !searchQuery ? 'bg-amber-400 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Star size={14} className="inline" /></button>
+            <button onClick={() => {setAppMode('quiz'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'quiz' && !searchQuery ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Gamepad2 size={14} className="inline mr-1" /> 測意</button>
+            <button onClick={() => {setAppMode('cloze'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'cloze' && !searchQuery ? 'bg-sky-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><PenTool size={14} className="inline mr-1" /> 填空</button>
+            <button onClick={() => {setAppMode('starred'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'starred' && !searchQuery ? 'bg-amber-400 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Star size={14} className="inline" /></button>
           </div>
         </div>
 
-        {/* 主視圖 */}
         {activeDeck.length === 0 ? (
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
@@ -575,15 +568,14 @@ export default function App() {
             {appMode === 'boss' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部</button>}
           </div>
         ) : appMode === 'quiz' && !searchQuery ? (
-          // 🎮 測驗模式 UI
-          <div className="w-full bg-white rounded-3xl shadow-xl border border-emerald-100 p-6 flex flex-col relative overflow-hidden">
+          // 🎮 測驗模式 UI (取消自動跳轉)
+          <div className="w-full bg-white rounded-3xl shadow-xl border border-emerald-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-400"></div>
             <div className="absolute top-4 left-4 flex gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
               <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字記得次數"><Check size={10}/> {cardStats.remembered}</span>
               <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字忘記次數"><X size={10}/> {cardStats.forgot}</span>
             </div>
             
-            {/* 等級標籤 */}
             {currentCard.level && (
               <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
                 Lv. {currentCard.level}
@@ -595,17 +587,122 @@ export default function App() {
               <h2 className="text-4xl font-extrabold text-slate-800 mt-4 mb-1">{currentCard.word}</h2>
               <button onClick={(e) => speak(e, currentCard.word)} className="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-emerald-600 transition-colors"><Volume2 size={16}/> 聽發音</button>
             </div>
+
             <div className="space-y-3 flex-1 flex flex-col justify-center">
               {quizOptions.map((opt, i) => {
                 let btnStyle = "bg-slate-50 border-slate-200 text-slate-700 hover:bg-emerald-50 hover:border-emerald-200";
-                if (quizResult && opt.word === currentCard.word) btnStyle = "bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-200 scale-[1.02] z-10";
-                else if (quizResult && opt.word !== currentCard.word) btnStyle = "bg-slate-50 border-slate-200 text-slate-300 opacity-50";
+                // 🔥 修改樣式邏輯：永遠標示正確答案，並且把選錯的標為紅色
+                if (quizResult) {
+                  if (opt.word === currentCard.word) {
+                    btnStyle = "bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-200 scale-[1.02] z-10"; // 正確答案
+                  } else if (opt.word === selectedQuizOption) {
+                    btnStyle = "bg-rose-500 border-rose-600 text-white shadow-md shadow-rose-200 scale-[1.02] z-10"; // 錯的答案
+                  } else {
+                    btnStyle = "bg-slate-50 border-slate-200 text-slate-300 opacity-50"; // 其他無關選項
+                  }
+                }
                 return (
                   <button key={i} onClick={() => handleQuizAnswer(opt.word)} disabled={quizResult !== null} className={`w-full text-left px-5 py-4 rounded-2xl border-2 font-medium transition-all duration-300 ${btnStyle}`}>{opt.meaning}</button>
                 )
               })}
             </div>
-            {quizResult && <div className={`absolute top-4 right-16 text-2xl animate-in zoom-in ${quizResult === 'correct' ? 'text-emerald-500' : 'text-rose-500'}`}>{quizResult === 'correct' ? '✅' : '❌'}</div>}
+            
+            {/* 🔥 新增：測驗解析與手動下一題按鈕 */}
+            {quizResult && (
+              <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
+                <div className="text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <p className="text-xs font-bold text-slate-400 mb-1">
+                    {quizResult === 'correct' ? '🎉 太棒了，你答對了！' : '❌ 答錯囉，請記住以下解釋：'}
+                  </p>
+                  <p className="text-lg font-bold text-emerald-600">{currentCard.meaning}</p>
+                </div>
+                <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
+                  下一題 <ChevronRight size={20} />
+                </button>
+              </div>
+            )}
+          </div>
+        ) : appMode === 'cloze' && !searchQuery ? (
+          // 📝 克漏字填空模式 UI (取消自動跳轉)
+          <div className="w-full bg-white rounded-3xl shadow-xl border border-sky-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
+            <div className="absolute top-0 left-0 w-full h-1 bg-sky-400"></div>
+            
+            <div className="absolute top-4 left-4 flex gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字記得次數"><Check size={10}/> {cardStats.remembered}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字忘記次數"><X size={10}/> {cardStats.forgot}</span>
+            </div>
+
+            {currentCard.level && (
+              <span className="absolute top-4 right-4 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                Lv. {currentCard.level}
+              </span>
+            )}
+
+            <div className="text-center mb-4 mt-4">
+              <span className="text-sky-600 text-xs font-bold tracking-widest uppercase bg-sky-50 px-3 py-1 rounded-full">依語境選擇單字</span>
+              
+              <div className="mt-6 mb-2 text-lg font-medium text-slate-700 leading-relaxed px-2 text-left">
+                {(() => {
+                  const exampleSentence = currentCard.examples && currentCard.examples.length > 0 ? currentCard.examples[0] : "";
+                  let blankedSentence = exampleSentence;
+                  if (blankedSentence) {
+                      const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                      let regex = new RegExp(`\\b${escapeRegExp(currentCard.word)}\\b`, 'gi');
+                      if (!regex.test(blankedSentence)) regex = new RegExp(escapeRegExp(currentCard.word), 'gi'); 
+                      if (!regex.test(blankedSentence) && currentCard.word.length > 4) {
+                         const stem = currentCard.word.slice(0, -2);
+                         regex = new RegExp(`\\b${escapeRegExp(stem)}\\w*\\b`, 'gi');
+                      }
+                      blankedSentence = blankedSentence.replace(regex, '_______');
+                  }
+                  if (blankedSentence === exampleSentence && blankedSentence.length > 0) {
+                      blankedSentence += " (______)";
+                  } else if (blankedSentence.length === 0) {
+                      blankedSentence = `(此單字無例句，請選出符合字義的單字)\n「${currentCard.meaning}」`;
+                  }
+                  return blankedSentence;
+                })()}
+              </div>
+            </div>
+
+            <div className="space-y-3 flex-1 flex flex-col justify-center">
+              {quizOptions.map((opt, i) => {
+                let btnStyle = "bg-slate-50 border-slate-200 text-slate-700 hover:bg-sky-50 hover:border-sky-200";
+                // 🔥 修改樣式邏輯：永遠標示正確答案，並且把選錯的標為紅色
+                if (quizResult) {
+                  if (opt.word === currentCard.word) {
+                    btnStyle = "bg-sky-500 border-sky-600 text-white shadow-md shadow-sky-200 scale-[1.02] z-10";
+                  } else if (opt.word === selectedQuizOption) {
+                    btnStyle = "bg-rose-500 border-rose-600 text-white shadow-md shadow-rose-200 scale-[1.02] z-10";
+                  } else {
+                    btnStyle = "bg-slate-50 border-slate-200 text-slate-300 opacity-50";
+                  }
+                }
+                return (
+                  <button key={i} onClick={() => handleQuizAnswer(opt.word)} disabled={quizResult !== null} className={`w-full text-center px-5 py-3 rounded-2xl border-2 font-bold text-lg transition-all duration-300 ${btnStyle}`}>{opt.word}</button>
+                )
+              })}
+            </div>
+
+            {/* 🔥 新增：填空解析與手動下一題按鈕 */}
+            {quizResult && (
+              <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
+                <div className="text-center bg-sky-50 p-4 rounded-xl border border-sky-100">
+                  <p className="text-xs font-bold text-slate-400 mb-2">
+                    {quizResult === 'correct' ? '🎉 答對了！' : '❌ 答錯了，請確認正確用法：'}
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-sky-700 font-extrabold text-xl">{currentCard.word}</span>
+                    <button onClick={(e) => speak(e, currentCard.word)} className="bg-white text-sky-500 hover:bg-sky-100 p-1.5 rounded-full shadow-sm transition-colors"><Volume2 size={16}/></button>
+                  </div>
+                  <p className="text-sm font-medium text-slate-700 mt-2">{currentCard.meaning}</p>
+                </div>
+                <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
+                  下一題 <ChevronRight size={20} />
+                </button>
+              </div>
+            )}
+            
           </div>
         ) : (
           // 📚 翻轉卡片模式 UI
@@ -617,7 +714,6 @@ export default function App() {
                 {appMode === 'boss' && <div className="absolute top-0 left-0 w-full h-1 bg-rose-500"></div>}
                 <button onClick={(e) => toggleStar(e, currentCard.word)} className={`absolute top-5 right-5 z-20 transition-all ${stats[currentCard.word]?.starred ? 'text-amber-400 fill-amber-400 drop-shadow-sm scale-110' : 'text-slate-300 hover:text-amber-300'}`}><Star size={24} /></button>
                 
-                {/* 🔥 新增：等級標籤 */}
                 {currentCard.level && (
                   <span className="absolute top-6 right-14 text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 shadow-sm">
                     Lv. {currentCard.level}
@@ -659,7 +755,6 @@ export default function App() {
                     <button onClick={(e) => speak(e, currentCard.meaning, 'zh-TW')} className="mt-1 text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 rounded-full p-2"><Volume2 size={20} /></button>
                   </div>
 
-                  {/* 🔥 新增：字根字首專區 */}
                   {currentCard.root && (
                     <div className="mb-4 bg-purple-50 p-3 rounded-xl border border-purple-200 shadow-sm relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-1 h-full bg-purple-400"></div>
@@ -713,7 +808,7 @@ export default function App() {
             <div className="text-center px-4 flex-1">
               <div className="text-xs font-bold text-slate-600 tracking-wider mb-1.5">{safeIndex + 1} / {activeDeck.length}</div>
               <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden relative">
-                <div className={`absolute top-0 left-0 h-full transition-all duration-300 ${appMode === 'due' || appMode === 'boss' ? 'bg-rose-500' : appMode === 'quiz' ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${((safeIndex + 1) / activeDeck.length) * 100}%` }} />
+                <div className={`absolute top-0 left-0 h-full transition-all duration-300 ${appMode === 'due' || appMode === 'boss' ? 'bg-rose-500' : appMode === 'quiz' ? 'bg-emerald-500' : appMode === 'cloze' ? 'bg-sky-500' : 'bg-indigo-500'}`} style={{ width: `${((safeIndex + 1) / activeDeck.length) * 100}%` }} />
               </div>
             </div>
             <button onClick={() => goNext()} className="p-2 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 rounded-xl transition-colors"><ChevronRight size={20} /></button>
