@@ -52,11 +52,11 @@ const TranslatableWord = ({ word }) => {
 // 預設精選單字範例
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
-  // "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
-  // "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
-  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
-  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  // "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
+  "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
+  "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
+  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
+  "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
+  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
@@ -96,7 +96,6 @@ export default function App() {
   const [quizResult, setQuizResult] = useState(null); 
   const [selectedQuizOption, setSelectedQuizOption] = useState(null);
 
-  // 填空模式翻譯狀態
   const [sentenceTranslation, setSentenceTranslation] = useState(null);
   const [isTranslatingSentence, setIsTranslatingSentence] = useState(false);
 
@@ -197,7 +196,7 @@ export default function App() {
     if ((appMode === 'quiz' || appMode === 'cloze') && currentCard) {
       setQuizResult(null); 
       setSelectedQuizOption(null);
-      setSentenceTranslation(null); // 切換題目時清空整句翻譯
+      setSentenceTranslation(null);
       const wrongCards = [...originalDeck].filter(c => c.word !== currentCard.word).sort(() => 0.5 - Math.random()).slice(0, 3);
       const options = [currentCard, ...wrongCards].sort(() => 0.5 - Math.random());
       setQuizOptions(options);
@@ -212,7 +211,6 @@ export default function App() {
     handleSRS(isCorrect ? 3 : 0, true);
   };
 
-  // 🔥 請求整句翻譯
   const handleTranslateSentence = async () => {
     if (sentenceTranslation) {
       setSentenceTranslation(null);
@@ -385,6 +383,7 @@ export default function App() {
   }, [activity]);
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
+  // === 🚀 核心升級：精準字根群組繼承演算法 ===
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
       setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
@@ -396,32 +395,53 @@ export default function App() {
   const parseRawText = (text) => {
     const lines = text.split('\n');
     let newCards = [], activeCard = null, currentTag = null;
+    let sharedRoot = ""; // 🔥 用來記憶「群組大標題」的字根
+
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i].trim();
       if (!line) continue;
       if (line.includes('@gmail') || line.includes('Mason 1000') || line.includes('Mason 2000') || /^\d+@/.test(line) || /^grey\.pan/.test(line) || line.includes('gmail.com')) continue;
       if (line.match(/^---.*PAGE.*---$/i)) continue;
       
+      // 1. 攔截大標題級別的字根 (跨單字群組共用)
+      if (line.match(/^[\[【]字根[\]】]/)) {
+        sharedRoot = line.replace(/^[\[【]字根[\]】]/, '').trim();
+        currentTag = 'sharedRoot'; 
+        continue; // 這是群組標題，跳過，不當作卡片內容
+      }
+
+      // 2. 匹配新單字
       const wordMatch = line.match(/^([a-zA-Z0-9]+)\s+([a-zA-Z-\s]+)$/);
       if (wordMatch) {
         if (activeCard && activeCard.word) newCards.push(activeCard);
-        activeCard = { level: wordMatch[1].trim(), word: wordMatch[2].trim(), pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", root: "" };
+        activeCard = { 
+          level: wordMatch[1].trim(), word: wordMatch[2].trim(), 
+          pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", 
+          root: sharedRoot // 🔥 新單字誕生時，自動繼承目前的共用字根！
+        };
         currentTag = 'pron'; continue;
       }
+      
+      // 處理標題字根可能跨行的情況 (還沒遇到單字之前)
+      if (currentTag === 'sharedRoot' && !activeCard) {
+          sharedRoot += " " + line;
+          continue;
+      }
+
       if (!activeCard) continue;
 
-      if (line.startsWith('[義]')) { currentTag = 'meaning'; activeCard.meaning += line.substring(3).trim() + " "; } 
-      else if (line.startsWith('[例]')) { currentTag = 'example'; activeCard.examples.push(line.substring(3).trim()); } 
-      else if (line.startsWith('[英]')) { currentTag = 'english'; activeCard.englishDef += line.substring(3).trim() + " "; } 
-      else if (line.startsWith('[記]')) { currentTag = 'note'; activeCard.note += line.substring(3).trim() + " "; } 
-      else if (line.startsWith('[字根]')) { currentTag = 'root'; activeCard.root += line.substring(4).trim() + " "; }
+      // 3. 處理單字內部的各種標籤
+      if (line.match(/^[\[【]義[\]】]/)) { currentTag = 'meaning'; activeCard.meaning += line.replace(/^[\[【]義[\]】]/, '').trim() + " "; }
+      else if (line.match(/^[\[【]例[\]】]/)) { currentTag = 'example'; activeCard.examples.push(line.replace(/^[\[【]例[\]】]/, '').trim()); }
+      else if (line.match(/^[\[【]英[\]】]/)) { currentTag = 'english'; activeCard.englishDef += line.replace(/^[\[【]英[\]】]/, '').trim() + " "; }
+      else if (line.match(/^[\[【]記[\]】]/)) { currentTag = 'note'; activeCard.note += line.replace(/^[\[【]記[\]】]/, '').trim() + " "; }
       else {
         if (currentTag === 'pron') activeCard.pronunciation += line;
         else if (currentTag === 'meaning') activeCard.meaning += line + " ";
         else if (currentTag === 'example') { if (activeCard.examples.length > 0) activeCard.examples[activeCard.examples.length - 1] += " " + line; else activeCard.examples.push(line); }
         else if (currentTag === 'english') activeCard.englishDef += line + " ";
         else if (currentTag === 'note') activeCard.note += line + " ";
-        else if (currentTag === 'root') activeCard.root += line + " ";
+        else if (currentTag === 'sharedRoot') activeCard.root += line + " "; // 若遇到跨行字根剛好在單字內
       }
     }
     if (activeCard && activeCard.word) newCards.push(activeCard);
@@ -504,14 +524,6 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  const clearStats = () => {
-    if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
-      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-      localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
-      setShowStatsModal(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-2 sm:p-4 font-sans relative overflow-hidden">
       <style dangerouslySetInnerHTML={{__html: `
@@ -572,7 +584,7 @@ export default function App() {
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
             <p className="font-bold text-lg mb-2">這裡空空的</p>
-            <p className="text-sm">找不到符合條件的單字。</p>
+            <p className="text-sm">找不到符合條件的單字。如果你正在「待複習」模式，恭喜你今天任務達成！</p>
             {appMode === 'boss' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部</button>}
           </div>
         ) : appMode === 'quiz' && !searchQuery ? (
@@ -646,19 +658,12 @@ export default function App() {
             <div className="text-center mb-4 mt-4">
               <div className="flex justify-between items-center mb-4 mt-2 px-1">
                 <span className="text-sky-600 text-xs font-bold tracking-widest uppercase bg-sky-50 px-3 py-1 rounded-full">依語境選擇單字</span>
-                
-                {/* 🌐 整句翻譯按鈕 */}
-                <button 
-                  onClick={handleTranslateSentence} 
-                  className="text-slate-400 hover:text-sky-500 bg-slate-50 hover:bg-sky-50 p-2 rounded-full transition-colors flex items-center gap-1"
-                  title="翻譯整句"
-                >
+                <button onClick={handleTranslateSentence} className="text-slate-400 hover:text-sky-500 bg-slate-50 hover:bg-sky-50 p-2 rounded-full transition-colors flex items-center gap-1" title="翻譯整句">
                   {isTranslatingSentence ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />}
                   <span className="text-[10px] font-bold">{sentenceTranslation ? '隱藏' : '翻譯'}</span>
                 </button>
               </div>
               
-              {/* 🔥 智慧挖空例句、中文遮罩與可點擊翻譯的單字 */}
               <div className="mt-2 mb-2 text-[17px] font-medium text-slate-700 leading-relaxed px-2 text-left">
                 {(() => {
                   const exampleSentence = currentCard.examples && currentCard.examples.length > 0 ? currentCard.examples[0] : "";
@@ -667,7 +672,6 @@ export default function App() {
                       return <span className="whitespace-pre-wrap">{`(此單字無例句，請根據下方字義選擇單字)\n「${currentCard.meaning}」`}</span>;
                   }
 
-                  // 找出要挖空的部分
                   const getClozeRegex = (word, sentence) => {
                       const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                       let r = new RegExp(`(\\b${escaped}\\b)`, 'gi');
@@ -688,13 +692,11 @@ export default function App() {
                   const renderTokens = tokens.map((token, index) => {
                       if (regex && index % 2 === 1) {
                           if (quizResult !== null) {
-                              // 🔥 回答後還原正確答案，並加上底線與顏色
                               return <span key={index} className="underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1 mx-1">{token}</span>;
                           } else {
                               return <span key={index} className="tracking-widest text-slate-400 font-bold mx-1">_______</span>;
                           }
                       } else {
-                          // 正常句子區塊，切割成中文、英文單字與標點
                           const subTokens = token.split(/([a-zA-Z]+|[^\x00-\x7F]+)/g);
                           return subTokens.map((subToken, j) => {
                               if (!subToken) return null;
@@ -724,7 +726,6 @@ export default function App() {
                 })()}
               </div>
 
-              {/* 整句翻譯的顯示區塊 */}
               {sentenceTranslation && (
                 <div className="mt-3 p-3 bg-sky-50 text-sky-800 text-sm font-medium rounded-xl border border-sky-100 animate-in fade-in slide-in-from-top-2 text-left">
                   {sentenceTranslation}
@@ -759,7 +760,6 @@ export default function App() {
               })}
             </div>
 
-            {/* 填空手動下一題按鈕 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
                 <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
@@ -1020,3 +1020,5 @@ export default function App() {
     </div>
   );
 }
+
+
