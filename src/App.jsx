@@ -26,7 +26,7 @@ const TranslatableWord = ({ word }) => {
   const toggleTranslate = async (e) => {
     e.stopPropagation();
     if (translation) {
-      setTranslation(null); // 再按一次還原
+      setTranslation(null); 
       return;
     }
     setLoading(true);
@@ -49,50 +49,92 @@ const TranslatableWord = ({ word }) => {
   );
 };
 
-// === 獨立元件：智慧句型引擎 ===
-const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = "sky" }) => {
-  if (!sentence) return null;
+// === 🚀 核心演算法：Levenshtein 編輯距離 (計算兩個單字的相似度) ===
+const getEditDistance = (a, b) => {
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+};
 
-  let regex = null;
+// === 🚀 核心演算法：精準抓出例句中對應的挖空單字 (支援不規則變形) ===
+const getClozeRegex = (targetWord, sentence) => {
+  if (!targetWord || !sentence) return null;
+  const target = targetWord.toLowerCase().trim();
+  const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  if (isCloze && targetWord) {
-    const target = targetWord.toLowerCase().trim();
-    const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const wordsInSentence = sentence.match(/[a-zA-Z]+/g) || [];
+  // 1. 完全精準匹配
+  const exactRegex = new RegExp(`(\\b${escapeRegExp(target)}\\b)`, 'gi');
+  if (exactRegex.test(sentence)) return new RegExp(`(\\b${escapeRegExp(target)}\\b)`, 'gi');
 
-    const exactMatch = wordsInSentence.find(w => w.toLowerCase() === target);
-    if (exactMatch) {
-      regex = new RegExp(`(\\b${escapeRegExp(exactMatch)}\\b)`, 'gi');
-    } else {
-      const findByPrefix = (prefixLen) => {
-        if (target.length < prefixLen) return null;
-        const prefix = target.slice(0, prefixLen);
-        const candidates = wordsInSentence.filter(w => w.toLowerCase().startsWith(prefix));
-        
-        if (candidates.length === 1) return candidates[0];
-        if (candidates.length > 1) {
-          return candidates.sort((a, b) => Math.abs(a.length - target.length) - Math.abs(b.length - target.length))[0];
-        }
-        return null;
-      };
+  // 2. 如果是片語，嘗試直接匹配
+  if (target.includes(' ')) {
+    const phraseRegex = new RegExp(`(${escapeRegExp(target)})`, 'gi');
+    if (phraseRegex.test(sentence)) return new RegExp(`(${escapeRegExp(target)})`, 'gi');
+  }
 
-      let found = false;
-      for (let len = target.length; len >= 3; len--) {
-        const match = findByPrefix(len);
-        if (match) {
-          regex = new RegExp(`(\\b${escapeRegExp(match)}\\b)`, 'gi');
-          found = true;
-          break;
-        }
+  // 3. 智慧相似度匹配 (處理 override -> overrode, catch -> caught 等)
+  const words = sentence.match(/[a-zA-Z]+/g) || [];
+  if (words.length === 0) return null;
+
+  let bestMatch = null;
+  let minScore = 999;
+  const targetClean = target.replace(/[^a-z]/g, '');
+
+  if (targetClean.length >= 2) {
+    for (const w of words) {
+      const wLower = w.toLowerCase();
+      if (targetClean[0] !== wLower[0]) continue; // 至少首字母要一樣
+
+      const dist = getEditDistance(targetClean, wLower);
+      const lenDiff = Math.abs(targetClean.length - wLower.length);
+
+      let prefixMatch = 0;
+      while (prefixMatch < targetClean.length && prefixMatch < wLower.length && targetClean[prefixMatch] === wLower[prefixMatch]) {
+        prefixMatch++;
       }
 
-      if (!found) {
-        let r = new RegExp(`(${escapeRegExp(target)})`, 'gi');
-        if (r.test(sentence)) regex = r;
+      // 如果高度相似，記錄為候選字
+      if ((dist <= 3 && prefixMatch >= 2) || (dist <= 4 && prefixMatch >= 3 && lenDiff <= 4)) {
+        const score = dist - prefixMatch;
+        if (score < minScore) {
+          minScore = score;
+          bestMatch = w;
+        }
       }
     }
   }
 
+  if (bestMatch) {
+    return new RegExp(`(\\b${escapeRegExp(bestMatch)}\\b)`, 'gi');
+  }
+
+  // 4. 終極保底：擷取前 4 個字母進行字首匹配
+  if (targetClean.length >= 5) {
+    const prefix = targetClean.substring(0, 4);
+    const fallbackRegex = new RegExp(`(\\b${escapeRegExp(prefix)}\\w*\\b)`, 'gi');
+    if (fallbackRegex.test(sentence)) return new RegExp(`(\\b${escapeRegExp(prefix)}\\w*\\b)`, 'gi');
+  }
+
+  return null;
+};
+
+// === 獨立元件：智慧句型引擎 ===
+const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = "sky" }) => {
+  if (!sentence) return null;
+
+  const regex = isCloze && targetWord ? getClozeRegex(targetWord, sentence) : null;
   const tokens = regex ? sentence.split(regex) : [sentence];
 
   const renderTokens = tokens.map((token, index) => {
@@ -142,10 +184,7 @@ const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
   "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
   "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
-  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
-  "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白",
-  "override|[,ovə'raɪd]|否決、不顧、使無效|v. to use your authority to reject sb's decision, order, etc.|panic overrode everything else. 恐慌壓過了一切|||4"
+  "override|[,ovə'raɪd]|否決、不顧、使無效|v. to use your authority to reject sb's decision|panic overrode everything else. 恐慌壓過了一切|||4"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
@@ -162,7 +201,15 @@ const getTodayStr = (dateObj = new Date()) => {
 
 export default function App() {
   const [originalDeck, setOriginalDeck] = useState(() => {
-    try { const saved = localStorage.getItem('mason-deck'); return saved ? JSON.parse(saved) : initialVocabulary; } catch (e) { return initialVocabulary; }
+    try { 
+      const saved = localStorage.getItem('mason-deck'); 
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // 🔥 資料庫防呆機制：過濾掉任何沒有中文解釋的無效單字
+        return parsed.filter(c => c.word && c.meaning && c.meaning.trim() !== "");
+      }
+      return initialVocabulary; 
+    } catch (e) { return initialVocabulary; }
   });
   
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
@@ -478,12 +525,15 @@ export default function App() {
   }, [activity]);
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
+  // === 資料庫管理與解析 ===
   const finalizeImport = (newCards) => {
-    if (newCards.length > 0) {
-      setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+    // 🔥 解析完畢後，再次進行嚴格的資料過濾，確保單字都有中文解釋
+    const validCards = newCards.filter(c => c.word && c.meaning && c.meaning.trim() !== "");
+    if (validCards.length > 0) {
+      setOriginalDeck(validCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
       setSearchQuery(''); setImportText(''); setShowDataModal(false);
-      alert(`🎉 完美解析！成功匯入 ${newCards.length} 個單字。`);
-    } else alert("找不到可解析的單字，請確認文本格式。");
+      alert(`🎉 完美解析！成功過濾並匯入 ${validCards.length} 個單字。`);
+    } else alert("找不到可解析的有效單字，請確認文本格式。");
   };
 
   const parseRawText = (text) => {
@@ -615,55 +665,29 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // 🔥 深度修復：徹底清除所有關聯狀態
   const clearStats = () => {
     if (window.confirm("⚠️ 確定要清除所有「學習紀錄」嗎？\n\n(此動作將清空包含打卡、熟悉度、收藏等所有數據，無法復原)")) {
-      setStats({}); 
-      setActivity({}); 
-      setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-      setBossDeckWords([]);
-      setIsShuffled(false);
-      setShuffledWords([]);
-      setAppMode('study'); // 重置回全部模式，避免殘留在空狀態
-
-      localStorage.removeItem('mason-stats'); 
-      localStorage.removeItem('mason-activity'); 
-      localStorage.removeItem('mason-indexes');
-      localStorage.removeItem('mason-shuffledWords');
-      localStorage.removeItem('mason-isShuffled');
+      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      setBossDeckWords([]); setIsShuffled(false); setShuffledWords([]); setAppMode('study');
+      localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
+      localStorage.removeItem('mason-shuffledWords'); localStorage.removeItem('mason-isShuffled');
       setShowStatsModal(false);
     }
   };
 
-  // 🔥 深度修復：清空題庫與狀態殘留
   const clearDeck = () => {
     if (window.confirm("⚠️ 確定要「清空目前題庫」中的所有單字嗎？\n\n(清空後，您可以上傳新的檔案建立專屬題庫。您的「學習統計數據」會被保留，若未來匯入相同單字可無縫延續進度)")) {
-      setOriginalDeck([]);
-      setAppMode('study');
-      setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-      setSearchQuery('');
-      setBossDeckWords([]);
-      setIsShuffled(false);
-      setShuffledWords([]);
-      setQuizResult(null);
-      setSelectedQuizOption(null);
-      setShowDataModal(false);
+      setOriginalDeck([]); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      setSearchQuery(''); setBossDeckWords([]); setIsShuffled(false); setShuffledWords([]);
+      setQuizResult(null); setSelectedQuizOption(null); setShowDataModal(false);
     }
   };
 
-  // 🔥 新增：一鍵恢復預設單字庫
   const restoreDefaultDeck = () => {
     if (window.confirm("確定要恢復預設的「精選單字庫」嗎？\n\n(這將覆蓋您目前的單字庫，但不會影響您的學習紀錄)")) {
-      setOriginalDeck(initialVocabulary);
-      setAppMode('study');
-      setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-      setSearchQuery('');
-      setBossDeckWords([]);
-      setIsShuffled(false);
-      setShuffledWords([]);
-      setQuizResult(null);
-      setSelectedQuizOption(null);
-      setShowDataModal(false);
+      setOriginalDeck(initialVocabulary); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      setSearchQuery(''); setBossDeckWords([]); setIsShuffled(false); setShuffledWords([]);
+      setQuizResult(null); setSelectedQuizOption(null); setShowDataModal(false);
     }
   };
 
@@ -879,7 +903,6 @@ export default function App() {
               })}
             </div>
 
-            {/* 填空手動下一題按鈕 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
                 <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
@@ -964,7 +987,6 @@ export default function App() {
                   <div>
                     <h4 className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-1.5">情境例句</h4>
                     <div className="space-y-2">
-                      {/* 🔥 翻轉卡片背面的例句也套用智慧翻譯引擎 */}
                       {currentCard.examples.map((ex, idx) => (
                         <div key={idx} className="bg-slate-50 p-3 rounded-xl flex gap-2 items-start border border-slate-100">
                           <button onClick={(e) => speak(e, ex)} className="mt-0.5 text-indigo-400 hover:text-white hover:bg-indigo-500 rounded-full p-1"><Volume2 size={14} /></button>
