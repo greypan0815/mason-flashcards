@@ -41,13 +41,79 @@ const TranslatableWord = ({ word }) => {
   };
 
   return (
-    <span onClick={toggleTranslate} className="cursor-pointer border-b border-transparent hover:border-sky-300 hover:text-sky-600 transition-colors inline relative whitespace-nowrap">
+    <span onClick={toggleTranslate} className="cursor-pointer border-b-2 border-transparent hover:border-indigo-300 hover:text-indigo-600 transition-colors inline relative whitespace-nowrap">
       {word}
-      {loading && <Loader2 size={12} className="inline animate-spin text-sky-400 ml-0.5 -mb-0.5" />}
-      {translation && <span className="text-[13px] font-bold text-sky-600 bg-sky-50 px-1 py-0.5 rounded mx-1 shadow-sm">({translation})</span>}
+      {loading && <Loader2 size={12} className="inline animate-spin text-indigo-400 ml-0.5 -mb-0.5" />}
+      {translation && <span className="text-[13px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded mx-1 shadow-sm border border-indigo-100">({translation})</span>}
     </span>
   );
 };
+
+// === 獨立元件：智慧句型引擎 (支援挖空、還原、翻譯) ===
+const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = "sky" }) => {
+  if (!sentence) return null;
+
+  let blankedSentence = sentence;
+  let regex = null;
+
+  // 處理克漏字挖空邏輯
+  if (isCloze && targetWord) {
+    const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    regex = new RegExp(`(\\b${escapeRegExp(targetWord)}\\b)`, 'gi');
+    if (!regex.test(blankedSentence)) regex = new RegExp(`(${escapeRegExp(targetWord)})`, 'gi');
+    if (!regex.test(blankedSentence) && targetWord.length > 4) {
+      const stem = escapeRegExp(targetWord).slice(0, -2);
+      regex = new RegExp(`(\\b${stem}\\w*\\b)`, 'gi');
+    }
+  }
+
+  const tokens = regex ? sentence.split(regex) : [sentence];
+
+  const renderTokens = tokens.map((token, index) => {
+    // 目標單字的替換/還原
+    if (regex && index % 2 === 1) {
+      if (isAnswered) {
+        return <span key={index} className={`underline decoration-${themeClass}-500 underline-offset-4 font-bold text-${themeClass}-600 px-1 mx-1`}>{token}</span>;
+      } else {
+        return <span key={index} className="tracking-widest text-slate-400 font-bold mx-1">_______</span>;
+      }
+    } else {
+      // 正常句子區塊，切割成中文、英文單字與標點
+      const subTokens = token.split(/([^\x00-\x7F]+)/g);
+      return subTokens.map((subToken, j) => {
+        if (!subToken) return null;
+        if (/[^\x00-\x7F]/.test(subToken)) {
+          return <HiddenChineseText key={`cn-${index}-${j}`} text={subToken} />;
+        } else {
+          const engTokens = subToken.split(/([a-zA-Z]+)/g);
+          return <span key={`en-wrap-${index}-${j}`}>
+            {engTokens.map((t, k) => {
+              if (/^[a-zA-Z]+$/.test(t)) {
+                return <TranslatableWord key={`en-${index}-${j}-${k}`} word={t} />;
+              }
+              return <span key={`other-${index}-${j}-${k}`}>{t}</span>;
+            })}
+          </span>;
+        }
+      });
+    }
+  });
+
+  // 如果找不到單字可以挖空，但在克漏字模式下，將單字補在句尾
+  if (isCloze && !regex && sentence.length > 0) {
+    return (
+      <span>
+        {renderTokens}
+        {isAnswered
+          ? <span className={`ml-1 underline decoration-${themeClass}-500 underline-offset-4 font-bold text-${themeClass}-600 px-1`}>({targetWord})</span>
+          : <span className="ml-1 tracking-widest text-slate-400 font-bold"> (______)</span>}
+      </span>
+    );
+  }
+
+  return <span>{renderTokens}</span>;
+};
+
 
 // 預設精選單字範例
 const defaultWordsList = [
@@ -56,7 +122,8 @@ const defaultWordsList = [
   "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
   "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
   "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白"
+  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白",
+  "blithe|[blaɪð]|無憂無慮的、漫不經心的|adj. showing a casual and cheerful indifference considered to be callous or improper|a blithe disregard for the rules of the road|||4"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
@@ -96,6 +163,7 @@ export default function App() {
   const [quizResult, setQuizResult] = useState(null); 
   const [selectedQuizOption, setSelectedQuizOption] = useState(null);
 
+  // 共用的整句翻譯狀態
   const [sentenceTranslation, setSentenceTranslation] = useState(null);
   const [isTranslatingSentence, setIsTranslatingSentence] = useState(false);
 
@@ -148,21 +216,27 @@ export default function App() {
 
   const activeDeck = useMemo(() => {
     let filtered = originalDeck;
-    if (searchQuery.trim()) {
-      const sq = searchQuery.toLowerCase().trim();
-      filtered = originalDeck.filter(c => (c.word || '').toLowerCase().includes(sq) || (c.meaning || '').includes(searchQuery));
-    } else if (appMode === 'due') {
+    
+    if (appMode === 'due') {
       const now = Date.now();
-      filtered = originalDeck.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= now);
+      filtered = filtered.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= now);
       filtered.sort((a, b) => (stats[a.word].dueDate || 0) - (stats[b.word].dueDate || 0));
     } else if (appMode === 'starred') {
-      filtered = originalDeck.filter(c => stats[c.word]?.starred);
+      filtered = filtered.filter(c => stats[c.word]?.starred);
     } else if (appMode === 'boss') {
       const bossMap = new Map(bossDeckWords.map((w, i) => [w, i]));
-      filtered = originalDeck.filter(c => bossMap.has(c.word));
+      filtered = filtered.filter(c => bossMap.has(c.word));
       filtered.sort((a, b) => bossMap.get(a.word) - bossMap.get(b.word));
     }
     
+    if (searchQuery.trim()) {
+      const sq = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(c => 
+        (c.word || '').toLowerCase().includes(sq) || 
+        (c.meaning || '').includes(searchQuery)
+      );
+    }
+
     if (isShuffled && appMode !== 'due' && appMode !== 'boss' && !searchQuery && shuffledWords.length > 0) {
       const orderMap = new Map(shuffledWords.map((w, i) => [w, i]));
       filtered = [...filtered].sort((a, b) => {
@@ -196,7 +270,7 @@ export default function App() {
     if ((appMode === 'quiz' || appMode === 'cloze') && currentCard) {
       setQuizResult(null); 
       setSelectedQuizOption(null);
-      setSentenceTranslation(null);
+      setSentenceTranslation(null); 
       const wrongCards = [...originalDeck].filter(c => c.word !== currentCard.word).sort(() => 0.5 - Math.random()).slice(0, 3);
       const options = [currentCard, ...wrongCards].sort(() => 0.5 - Math.random());
       setQuizOptions(options);
@@ -383,7 +457,6 @@ export default function App() {
   }, [activity]);
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
-  // === 🚀 核心升級：精準字根群組繼承演算法 ===
   const finalizeImport = (newCards) => {
     if (newCards.length > 0) {
       setOriginalDeck(newCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
@@ -395,7 +468,7 @@ export default function App() {
   const parseRawText = (text) => {
     const lines = text.split('\n');
     let newCards = [], activeCard = null, currentTag = null;
-    let sharedRoot = ""; // 🔥 用來記憶「群組大標題」的字根
+    let sharedRoot = ""; 
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i].trim();
@@ -403,45 +476,42 @@ export default function App() {
       if (line.includes('@gmail') || line.includes('Mason 1000') || line.includes('Mason 2000') || /^\d+@/.test(line) || /^grey\.pan/.test(line) || line.includes('gmail.com')) continue;
       if (line.match(/^---.*PAGE.*---$/i)) continue;
       
-      // 1. 攔截大標題級別的字根 (跨單字群組共用)
       if (line.match(/^[\[【]字根[\]】]/)) {
         sharedRoot = line.replace(/^[\[【]字根[\]】]/, '').trim();
         currentTag = 'sharedRoot'; 
-        continue; // 這是群組標題，跳過，不當作卡片內容
+        continue; 
       }
 
-      // 2. 匹配新單字
       const wordMatch = line.match(/^([a-zA-Z0-9]+)\s+([a-zA-Z-\s]+)$/);
       if (wordMatch) {
         if (activeCard && activeCard.word) newCards.push(activeCard);
         activeCard = { 
           level: wordMatch[1].trim(), word: wordMatch[2].trim(), 
           pronunciation: "", meaning: "", englishDef: "", examples: [], note: "", 
-          root: sharedRoot // 🔥 新單字誕生時，自動繼承目前的共用字根！
+          root: sharedRoot 
         };
         currentTag = 'pron'; continue;
       }
       
-      // 處理標題字根可能跨行的情況 (還沒遇到單字之前)
       if (currentTag === 'sharedRoot' && !activeCard) {
-          sharedRoot += " " + line;
-          continue;
+          sharedRoot += " " + line; continue;
       }
 
       if (!activeCard) continue;
 
-      // 3. 處理單字內部的各種標籤
       if (line.match(/^[\[【]義[\]】]/)) { currentTag = 'meaning'; activeCard.meaning += line.replace(/^[\[【]義[\]】]/, '').trim() + " "; }
       else if (line.match(/^[\[【]例[\]】]/)) { currentTag = 'example'; activeCard.examples.push(line.replace(/^[\[【]例[\]】]/, '').trim()); }
       else if (line.match(/^[\[【]英[\]】]/)) { currentTag = 'english'; activeCard.englishDef += line.replace(/^[\[【]英[\]】]/, '').trim() + " "; }
       else if (line.match(/^[\[【]記[\]】]/)) { currentTag = 'note'; activeCard.note += line.replace(/^[\[【]記[\]】]/, '').trim() + " "; }
+      else if (line.match(/^[\[【]字根[\]】]/)) { currentTag = 'root'; activeCard.root += line.replace(/^[\[【]字根[\]】]/, '').trim() + " "; }
       else {
         if (currentTag === 'pron') activeCard.pronunciation += line;
         else if (currentTag === 'meaning') activeCard.meaning += line + " ";
         else if (currentTag === 'example') { if (activeCard.examples.length > 0) activeCard.examples[activeCard.examples.length - 1] += " " + line; else activeCard.examples.push(line); }
         else if (currentTag === 'english') activeCard.englishDef += line + " ";
         else if (currentTag === 'note') activeCard.note += line + " ";
-        else if (currentTag === 'sharedRoot') activeCard.root += line + " "; // 若遇到跨行字根剛好在單字內
+        else if (currentTag === 'root') activeCard.root += line + " ";
+        else if (currentTag === 'sharedRoot') activeCard.root += line + " "; 
       }
     }
     if (activeCard && activeCard.word) newCards.push(activeCard);
@@ -524,6 +594,14 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  const clearStats = () => {
+    if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
+      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
+      setShowStatsModal(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-2 sm:p-4 font-sans relative overflow-hidden">
       <style dangerouslySetInnerHTML={{__html: `
@@ -559,7 +637,7 @@ export default function App() {
           <div className="relative mb-2 flex gap-2">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <input type="text" placeholder="搜尋中英文單字..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-50 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-indigo-100 outline-none" />
+              <input type="text" placeholder="在當前模式中搜尋..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-50 border-none rounded-xl py-2 pl-9 pr-4 text-sm focus:ring-2 focus:ring-indigo-100 outline-none" />
             </div>
             <button type="button" onClick={(e) => { e.stopPropagation(); toggleShuffle(); }} disabled={appMode === 'due' || appMode === 'boss'} className={`flex items-center justify-center px-3 rounded-xl text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${isShuffled ? 'bg-indigo-600 text-white shadow-md border-transparent' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-100'}`}>
               {isShuffled ? <Sparkles size={14} className="mr-1" /> : <Shuffle size={14} className="mr-1" />}
@@ -568,14 +646,14 @@ export default function App() {
           </div>
           
           <div className="flex gap-1 overflow-x-auto custom-scrollbar pb-1">
-            <button onClick={() => {setAppMode('study'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'study' && !searchQuery ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>📚 全部</button>
-            <button onClick={() => {setAppMode('due'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap relative ${appMode === 'due' && !searchQuery ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
+            <button onClick={() => setAppMode('study')} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'study' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>📚 全部</button>
+            <button onClick={() => setAppMode('due')} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap relative ${appMode === 'due' ? 'bg-rose-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}>
               <CalendarCheck size={14} className="inline mr-1" /> 待複習
               {getDueCount() > 0 && <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center animate-bounce">{getDueCount()}</span>}
             </button>
-            <button onClick={() => {setAppMode('quiz'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'quiz' && !searchQuery ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Gamepad2 size={14} className="inline mr-1" /> 測意</button>
-            <button onClick={() => {setAppMode('cloze'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'cloze' && !searchQuery ? 'bg-sky-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><PenTool size={14} className="inline mr-1" /> 填空</button>
-            <button onClick={() => {setAppMode('starred'); setSearchQuery('');}} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'starred' && !searchQuery ? 'bg-amber-400 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Star size={14} className="inline" /></button>
+            <button onClick={() => setAppMode('quiz')} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'quiz' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Gamepad2 size={14} className="inline mr-1" /> 測意</button>
+            <button onClick={() => setAppMode('cloze')} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'cloze' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><PenTool size={14} className="inline mr-1" /> 填空</button>
+            <button onClick={() => setAppMode('starred')} className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg transition-colors whitespace-nowrap ${appMode === 'starred' ? 'bg-amber-400 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}><Star size={14} className="inline" /></button>
           </div>
         </div>
 
@@ -584,10 +662,10 @@ export default function App() {
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
             <p className="font-bold text-lg mb-2">這裡空空的</p>
-            <p className="text-sm">找不到符合條件的單字。如果你正在「待複習」模式，恭喜你今天任務達成！</p>
+            <p className="text-sm">{searchQuery ? '找不到符合搜尋條件的單字。' : '如果你正在「待複習」模式，恭喜你今天任務達成！'}</p>
             {appMode === 'boss' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部</button>}
           </div>
-        ) : appMode === 'quiz' && !searchQuery ? (
+        ) : appMode === 'quiz' ? (
           // 🎮 測意模式 UI 
           <div className="w-full bg-white rounded-3xl shadow-xl border border-emerald-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-400"></div>
@@ -633,15 +711,45 @@ export default function App() {
               })}
             </div>
             
+            {/* 🔥 測意模式的詳解與翻譯回饋框 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
+                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                  <div className="text-center mb-3">
+                    <p className="text-xs font-bold text-slate-500 mb-1">
+                      {quizResult === 'correct' ? '🎉 太棒了，答對了！' : '❌ 答錯囉，請記住以下解釋：'}
+                    </p>
+                    <p className="text-lg font-extrabold text-emerald-700">{currentCard.meaning}</p>
+                  </div>
+
+                  {currentCard.examples && currentCard.examples.length > 0 && (
+                    <div className="border-t border-emerald-200/60 pt-3">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">情境例句</span>
+                        <button onClick={handleTranslateSentence} className="text-slate-400 hover:text-emerald-600 flex items-center gap-1" title="翻譯整句">
+                          {isTranslatingSentence ? <Loader2 size={12} className="animate-spin" /> : <Globe size={12} />}
+                          <span className="text-[10px] font-bold">{sentenceTranslation ? '隱藏' : '翻譯'}</span>
+                        </button>
+                      </div>
+                      <div className="text-[15px] font-medium text-slate-700 leading-relaxed text-left">
+                        <RichSentence sentence={currentCard.examples[0]} targetWord={currentCard.word} isCloze={false} isAnswered={true} themeClass="emerald" />
+                      </div>
+                      {sentenceTranslation && (
+                        <div className="mt-2 p-2 bg-white text-emerald-800 text-xs font-medium rounded-lg border border-emerald-100 shadow-sm text-left">
+                          {sentenceTranslation}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
                   下一題 <ChevronRight size={20} />
                 </button>
               </div>
             )}
           </div>
-        ) : appMode === 'cloze' && !searchQuery ? (
+        ) : appMode === 'cloze' ? (
           // 📝 克漏字填空模式 UI
           <div className="w-full bg-white rounded-3xl shadow-xl border border-sky-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
             <div className="absolute top-0 left-0 w-full h-1 bg-sky-400"></div>
@@ -658,74 +766,24 @@ export default function App() {
             <div className="text-center mb-4 mt-4">
               <div className="flex justify-between items-center mb-4 mt-2 px-1">
                 <span className="text-sky-600 text-xs font-bold tracking-widest uppercase bg-sky-50 px-3 py-1 rounded-full">依語境選擇單字</span>
+                
+                {/* 🌐 整句翻譯按鈕 */}
                 <button onClick={handleTranslateSentence} className="text-slate-400 hover:text-sky-500 bg-slate-50 hover:bg-sky-50 p-2 rounded-full transition-colors flex items-center gap-1" title="翻譯整句">
                   {isTranslatingSentence ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />}
                   <span className="text-[10px] font-bold">{sentenceTranslation ? '隱藏' : '翻譯'}</span>
                 </button>
               </div>
               
+              {/* 🔥 智慧挖空例句、中文遮罩與可點擊翻譯的單字 */}
               <div className="mt-2 mb-2 text-[17px] font-medium text-slate-700 leading-relaxed px-2 text-left">
-                {(() => {
-                  const exampleSentence = currentCard.examples && currentCard.examples.length > 0 ? currentCard.examples[0] : "";
-                  
-                  if (exampleSentence.length === 0) {
-                      return <span className="whitespace-pre-wrap">{`(此單字無例句，請根據下方字義選擇單字)\n「${currentCard.meaning}」`}</span>;
-                  }
-
-                  const getClozeRegex = (word, sentence) => {
-                      const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                      let r = new RegExp(`(\\b${escaped}\\b)`, 'gi');
-                      if (r.test(sentence)) return r;
-                      r = new RegExp(`(${escaped})`, 'gi');
-                      if (r.test(sentence)) return r;
-                      if (word.length > 4) {
-                          const stem = escaped.slice(0, -2);
-                          r = new RegExp(`(\\b${stem}\\w*\\b)`, 'gi');
-                          if (r.test(sentence)) return r;
-                      }
-                      return null;
-                  };
-
-                  const regex = getClozeRegex(currentCard.word, exampleSentence);
-                  const tokens = regex ? exampleSentence.split(regex) : [exampleSentence];
-
-                  const renderTokens = tokens.map((token, index) => {
-                      if (regex && index % 2 === 1) {
-                          if (quizResult !== null) {
-                              return <span key={index} className="underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1 mx-1">{token}</span>;
-                          } else {
-                              return <span key={index} className="tracking-widest text-slate-400 font-bold mx-1">_______</span>;
-                          }
-                      } else {
-                          const subTokens = token.split(/([a-zA-Z]+|[^\x00-\x7F]+)/g);
-                          return subTokens.map((subToken, j) => {
-                              if (!subToken) return null;
-                              if (/[^\x00-\x7F]/.test(subToken)) {
-                                  return <HiddenChineseText key={`cn-${index}-${j}`} text={subToken} />;
-                              } else if (/^[a-zA-Z]+$/.test(subToken)) {
-                                  return <TranslatableWord key={`en-${index}-${j}`} word={subToken} />;
-                              } else {
-                                  return <span key={`other-${index}-${j}`}>{subToken}</span>;
-                              }
-                          });
-                      }
-                  });
-
-                  if (!regex) {
-                      return (
-                          <span>
-                              {renderTokens}
-                              {quizResult !== null 
-                                  ? <span className="ml-1 underline decoration-sky-500 underline-offset-4 font-bold text-sky-600 px-1">({currentCard.word})</span>
-                                  : <span className="ml-1 tracking-widest text-slate-400 font-bold"> (______)</span>}
-                          </span>
-                      );
-                  }
-
-                  return <span>{renderTokens}</span>;
-                })()}
+                {currentCard.examples && currentCard.examples.length > 0 ? (
+                  <RichSentence sentence={currentCard.examples[0]} targetWord={currentCard.word} isCloze={true} isAnswered={quizResult !== null} themeClass="sky" />
+                ) : (
+                  <span className="whitespace-pre-wrap">{`(此單字無例句，請根據下方字義選擇單字)\n「${currentCard.meaning}」`}</span>
+                )}
               </div>
 
+              {/* 整句翻譯的顯示區塊 */}
               {sentenceTranslation && (
                 <div className="mt-3 p-3 bg-sky-50 text-sky-800 text-sm font-medium rounded-xl border border-sky-100 animate-in fade-in slide-in-from-top-2 text-left">
                   {sentenceTranslation}
@@ -760,6 +818,7 @@ export default function App() {
               })}
             </div>
 
+            {/* 填空手動下一題按鈕 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
                 <button onClick={() => goNext(false)} className="w-full py-3.5 bg-indigo-600 text-white rounded-2xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all text-lg flex items-center justify-center gap-2">
@@ -844,10 +903,13 @@ export default function App() {
                   <div>
                     <h4 className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-1.5">情境例句</h4>
                     <div className="space-y-2">
+                      {/* 🔥 翻轉卡片背面的例句也套用智慧翻譯引擎 */}
                       {currentCard.examples.map((ex, idx) => (
                         <div key={idx} className="bg-slate-50 p-3 rounded-xl flex gap-2 items-start border border-slate-100">
                           <button onClick={(e) => speak(e, ex)} className="mt-0.5 text-indigo-400 hover:text-white hover:bg-indigo-500 rounded-full p-1"><Volume2 size={14} /></button>
-                          <p className="text-sm text-slate-700 leading-relaxed font-medium">{ex}</p>
+                          <div className="text-sm text-slate-700 leading-relaxed font-medium flex-1">
+                            <RichSentence sentence={ex} targetWord={currentCard.word} isCloze={false} isAnswered={true} themeClass="indigo" />
+                          </div>
                         </div>
                       ))}
                     </div>
