@@ -49,28 +49,53 @@ const TranslatableWord = ({ word }) => {
   );
 };
 
-// === 獨立元件：智慧句型引擎 (支援挖空、還原、翻譯) ===
+// === 獨立元件：智慧句型引擎 ===
 const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = "sky" }) => {
   if (!sentence) return null;
 
-  let blankedSentence = sentence;
   let regex = null;
 
-  // 處理克漏字挖空邏輯
   if (isCloze && targetWord) {
+    const target = targetWord.toLowerCase().trim();
     const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    regex = new RegExp(`(\\b${escapeRegExp(targetWord)}\\b)`, 'gi');
-    if (!regex.test(blankedSentence)) regex = new RegExp(`(${escapeRegExp(targetWord)})`, 'gi');
-    if (!regex.test(blankedSentence) && targetWord.length > 4) {
-      const stem = escapeRegExp(targetWord).slice(0, -2);
-      regex = new RegExp(`(\\b${stem}\\w*\\b)`, 'gi');
+    const wordsInSentence = sentence.match(/[a-zA-Z]+/g) || [];
+
+    const exactMatch = wordsInSentence.find(w => w.toLowerCase() === target);
+    if (exactMatch) {
+      regex = new RegExp(`(\\b${escapeRegExp(exactMatch)}\\b)`, 'gi');
+    } else {
+      const findByPrefix = (prefixLen) => {
+        if (target.length < prefixLen) return null;
+        const prefix = target.slice(0, prefixLen);
+        const candidates = wordsInSentence.filter(w => w.toLowerCase().startsWith(prefix));
+        
+        if (candidates.length === 1) return candidates[0];
+        if (candidates.length > 1) {
+          return candidates.sort((a, b) => Math.abs(a.length - target.length) - Math.abs(b.length - target.length))[0];
+        }
+        return null;
+      };
+
+      let found = false;
+      for (let len = target.length; len >= 3; len--) {
+        const match = findByPrefix(len);
+        if (match) {
+          regex = new RegExp(`(\\b${escapeRegExp(match)}\\b)`, 'gi');
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        let r = new RegExp(`(${escapeRegExp(target)})`, 'gi');
+        if (r.test(sentence)) regex = r;
+      }
     }
   }
 
   const tokens = regex ? sentence.split(regex) : [sentence];
 
   const renderTokens = tokens.map((token, index) => {
-    // 目標單字的替換/還原
     if (regex && index % 2 === 1) {
       if (isAnswered) {
         return <span key={index} className={`underline decoration-${themeClass}-500 underline-offset-4 font-bold text-${themeClass}-600 px-1 mx-1`}>{token}</span>;
@@ -78,7 +103,6 @@ const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = 
         return <span key={index} className="tracking-widest text-slate-400 font-bold mx-1">_______</span>;
       }
     } else {
-      // 正常句子區塊，切割成中文、英文單字與標點
       const subTokens = token.split(/([^\x00-\x7F]+)/g);
       return subTokens.map((subToken, j) => {
         if (!subToken) return null;
@@ -99,7 +123,6 @@ const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = 
     }
   });
 
-  // 如果找不到單字可以挖空，但在克漏字模式下，將單字補在句尾
   if (isCloze && !regex && sentence.length > 0) {
     return (
       <span>
@@ -114,16 +137,15 @@ const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = 
   return <span>{renderTokens}</span>;
 };
 
-
 // 預設精選單字範例
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
-  // "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
-  // "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
-  // "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
-  // "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
-  // "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白",
-  // "blithe|[blaɪð]|無憂無慮的、漫不經心的|adj. showing a casual and cheerful indifference considered to be callous or improper|a blithe disregard for the rules of the road|||4"
+  "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
+  "sanguine|[`sæŋgwɪn]|自信樂觀的|adj (about sth/that...) hopeful; optimistic|Angela Merkel appears to have become more sanguine about a Grexit. 毀三觀之前是自信的|||5",
+  "meticulous|[mə`tɪkjələs]|小心翼翼的、一絲不苟的|adj. giving or showing great precision and care; very attentive to detail|a meticulous researcher|||5",
+  "undermine|[ˏʌndɚ`maɪn]|削弱|v. make a hollow or tunnel beneath (sth); weaken at the base|undermine people's confidence|",
+  "innocuous|[ɪˋnɑkjʊəs]|無害的|adj. causing no harm|It was an innocuous question.|innocence 無辜、清白",
+  "override|[,ovə'raɪd]|否決、不顧、使無效|v. to use your authority to reject sb's decision, order, etc.|panic overrode everything else. 恐慌壓過了一切|||4"
 ];
 
 const initialVocabulary = defaultWordsList.map(str => {
@@ -163,7 +185,6 @@ export default function App() {
   const [quizResult, setQuizResult] = useState(null); 
   const [selectedQuizOption, setSelectedQuizOption] = useState(null);
 
-  // 共用的整句翻譯狀態
   const [sentenceTranslation, setSentenceTranslation] = useState(null);
   const [isTranslatingSentence, setIsTranslatingSentence] = useState(false);
 
@@ -220,7 +241,7 @@ export default function App() {
     if (appMode === 'due') {
       const now = Date.now();
       filtered = filtered.filter(c => stats[c.word]?.dueDate && stats[c.word].dueDate <= now);
-      filtered.sort((a, b) => (stats[a.word].dueDate || 0) - (stats[b.word].dueDate || 0));
+      filtered.sort((a, b) => (stats[a.word]?.dueDate || 0) - (stats[b.word]?.dueDate || 0));
     } else if (appMode === 'starred') {
       filtered = filtered.filter(c => stats[c.word]?.starred);
     } else if (appMode === 'boss') {
@@ -594,11 +615,55 @@ export default function App() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
+  // 🔥 深度修復：徹底清除所有關聯狀態
   const clearStats = () => {
-    if (window.confirm("確定要清除所有學習紀錄嗎？此動作無法復原。")) {
-      setStats({}); setActivity({}); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-      localStorage.removeItem('mason-stats'); localStorage.removeItem('mason-activity'); localStorage.removeItem('mason-indexes');
+    if (window.confirm("⚠️ 確定要清除所有「學習紀錄」嗎？\n\n(此動作將清空包含打卡、熟悉度、收藏等所有數據，無法復原)")) {
+      setStats({}); 
+      setActivity({}); 
+      setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      setBossDeckWords([]);
+      setIsShuffled(false);
+      setShuffledWords([]);
+      setAppMode('study'); // 重置回全部模式，避免殘留在空狀態
+
+      localStorage.removeItem('mason-stats'); 
+      localStorage.removeItem('mason-activity'); 
+      localStorage.removeItem('mason-indexes');
+      localStorage.removeItem('mason-shuffledWords');
+      localStorage.removeItem('mason-isShuffled');
       setShowStatsModal(false);
+    }
+  };
+
+  // 🔥 深度修復：清空題庫與狀態殘留
+  const clearDeck = () => {
+    if (window.confirm("⚠️ 確定要「清空目前題庫」中的所有單字嗎？\n\n(清空後，您可以上傳新的檔案建立專屬題庫。您的「學習統計數據」會被保留，若未來匯入相同單字可無縫延續進度)")) {
+      setOriginalDeck([]);
+      setAppMode('study');
+      setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      setSearchQuery('');
+      setBossDeckWords([]);
+      setIsShuffled(false);
+      setShuffledWords([]);
+      setQuizResult(null);
+      setSelectedQuizOption(null);
+      setShowDataModal(false);
+    }
+  };
+
+  // 🔥 新增：一鍵恢復預設單字庫
+  const restoreDefaultDeck = () => {
+    if (window.confirm("確定要恢復預設的「精選單字庫」嗎？\n\n(這將覆蓋您目前的單字庫，但不會影響您的學習紀錄)")) {
+      setOriginalDeck(initialVocabulary);
+      setAppMode('study');
+      setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+      setSearchQuery('');
+      setBossDeckWords([]);
+      setIsShuffled(false);
+      setShuffledWords([]);
+      setQuizResult(null);
+      setSelectedQuizOption(null);
+      setShowDataModal(false);
     }
   };
 
@@ -662,8 +727,8 @@ export default function App() {
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
             <p className="font-bold text-lg mb-2">這裡空空的</p>
-            <p className="text-sm">{searchQuery ? '找不到符合搜尋條件的單字。' : '如果你正在「待複習」模式，恭喜你今天任務達成！'}</p>
-            {appMode === 'boss' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部</button>}
+            <p className="text-sm">{searchQuery ? '找不到符合搜尋條件的單字。' : '目前題庫中沒有單字，或已完成今日複習！'}</p>
+            {appMode !== 'study' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部模式</button>}
           </div>
         ) : appMode === 'quiz' ? (
           // 🎮 測意模式 UI 
@@ -711,7 +776,7 @@ export default function App() {
               })}
             </div>
             
-            {/* 🔥 測意模式的詳解與翻譯回饋框 */}
+            {/* 測意模式詳解 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
@@ -766,15 +831,12 @@ export default function App() {
             <div className="text-center mb-4 mt-4">
               <div className="flex justify-between items-center mb-4 mt-2 px-1">
                 <span className="text-sky-600 text-xs font-bold tracking-widest uppercase bg-sky-50 px-3 py-1 rounded-full">依語境選擇單字</span>
-                
-                {/* 🌐 整句翻譯按鈕 */}
                 <button onClick={handleTranslateSentence} className="text-slate-400 hover:text-sky-500 bg-slate-50 hover:bg-sky-50 p-2 rounded-full transition-colors flex items-center gap-1" title="翻譯整句">
                   {isTranslatingSentence ? <Loader2 size={16} className="animate-spin" /> : <Globe size={16} />}
                   <span className="text-[10px] font-bold">{sentenceTranslation ? '隱藏' : '翻譯'}</span>
                 </button>
               </div>
               
-              {/* 🔥 智慧挖空例句、中文遮罩與可點擊翻譯的單字 */}
               <div className="mt-2 mb-2 text-[17px] font-medium text-slate-700 leading-relaxed px-2 text-left">
                 {currentCard.examples && currentCard.examples.length > 0 ? (
                   <RichSentence sentence={currentCard.examples[0]} targetWord={currentCard.word} isCloze={true} isAnswered={quizResult !== null} themeClass="sky" />
@@ -783,7 +845,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* 整句翻譯的顯示區塊 */}
               {sentenceTranslation && (
                 <div className="mt-3 p-3 bg-sky-50 text-sky-800 text-sm font-medium rounded-xl border border-sky-100 animate-in fade-in slide-in-from-top-2 text-left">
                   {sentenceTranslation}
@@ -1067,6 +1128,7 @@ export default function App() {
                   <FileUp size={18} /> {isPdfLoaded ? '選擇 PDF 檔案' : '載入引擎中...'}
                 </button>
               </div>
+              
               <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100">
                 <h3 className="font-bold text-emerald-800 mb-2 flex items-center gap-2"><FileSpreadsheet size={18} /> 2. CSV (Excel) 管理</h3>
                 <div className="flex gap-2">
@@ -1075,6 +1137,20 @@ export default function App() {
                   <button onClick={() => csvInputRef.current.click()} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold text-sm shadow-sm flex justify-center items-center gap-2"><Upload size={16} /> 上傳 CSV</button>
                 </div>
               </div>
+
+              {/* 🔥 題庫與系統管理區塊 */}
+              <div className="bg-rose-50 rounded-2xl p-5 border border-rose-100">
+                <h3 className="font-bold text-rose-800 mb-3 flex items-center gap-2"><Trash2 size={18} /> 3. 題庫與系統管理</h3>
+                <div className="flex flex-col gap-2">
+                  <button onClick={restoreDefaultDeck} className="w-full py-3 bg-white border border-rose-200 text-rose-600 rounded-xl hover:bg-rose-100 font-bold text-sm flex justify-center items-center gap-2 transition-colors">
+                    <RotateCcw size={16} /> 恢復預設精選單字庫
+                  </button>
+                  <button onClick={clearDeck} className="w-full py-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 font-bold text-sm flex justify-center items-center gap-2 transition-colors shadow-sm">
+                    <Trash2 size={16} /> 徹底清空目前題庫
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
