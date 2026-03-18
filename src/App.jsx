@@ -49,7 +49,7 @@ const TranslatableWord = ({ word }) => {
   );
 };
 
-// === 🚀 核心演算法：Levenshtein 編輯距離 (計算兩個單字的相似度) ===
+// === 核心演算法：Levenshtein 編輯距離 ===
 const getEditDistance = (a, b) => {
   if (!a.length) return b.length;
   if (!b.length) return a.length;
@@ -68,23 +68,20 @@ const getEditDistance = (a, b) => {
   return matrix[b.length][a.length];
 };
 
-// === 🚀 核心演算法：精準抓出例句中對應的挖空單字 (支援不規則變形) ===
+// === 核心演算法：精準抓出例句挖空單字 ===
 const getClozeRegex = (targetWord, sentence) => {
   if (!targetWord || !sentence) return null;
   const target = targetWord.toLowerCase().trim();
   const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // 1. 完全精準匹配
   const exactRegex = new RegExp(`(\\b${escapeRegExp(target)}\\b)`, 'gi');
   if (exactRegex.test(sentence)) return new RegExp(`(\\b${escapeRegExp(target)}\\b)`, 'gi');
 
-  // 2. 如果是片語，嘗試直接匹配
   if (target.includes(' ')) {
     const phraseRegex = new RegExp(`(${escapeRegExp(target)})`, 'gi');
     if (phraseRegex.test(sentence)) return new RegExp(`(${escapeRegExp(target)})`, 'gi');
   }
 
-  // 3. 智慧相似度匹配 (處理 override -> overrode, catch -> caught 等)
   const words = sentence.match(/[a-zA-Z]+/g) || [];
   if (words.length === 0) return null;
 
@@ -95,7 +92,7 @@ const getClozeRegex = (targetWord, sentence) => {
   if (targetClean.length >= 2) {
     for (const w of words) {
       const wLower = w.toLowerCase();
-      if (targetClean[0] !== wLower[0]) continue; // 至少首字母要一樣
+      if (targetClean[0] !== wLower[0]) continue; 
 
       const dist = getEditDistance(targetClean, wLower);
       const lenDiff = Math.abs(targetClean.length - wLower.length);
@@ -105,7 +102,6 @@ const getClozeRegex = (targetWord, sentence) => {
         prefixMatch++;
       }
 
-      // 如果高度相似，記錄為候選字
       if ((dist <= 3 && prefixMatch >= 2) || (dist <= 4 && prefixMatch >= 3 && lenDiff <= 4)) {
         const score = dist - prefixMatch;
         if (score < minScore) {
@@ -120,7 +116,6 @@ const getClozeRegex = (targetWord, sentence) => {
     return new RegExp(`(\\b${escapeRegExp(bestMatch)}\\b)`, 'gi');
   }
 
-  // 4. 終極保底：擷取前 4 個字母進行字首匹配
   if (targetClean.length >= 5) {
     const prefix = targetClean.substring(0, 4);
     const fallbackRegex = new RegExp(`(\\b${escapeRegExp(prefix)}\\w*\\b)`, 'gi');
@@ -179,7 +174,7 @@ const RichSentence = ({ sentence, targetWord, isCloze, isAnswered, themeClass = 
   return <span>{renderTokens}</span>;
 };
 
-// 預設精選單字範例
+// 預設單字
 const defaultWordsList = [
   "mitigate|[mɪtə͵get]|使緩和、減輕|v. make (sth) less severe, violent or painful; moderate|mitigate patients' suffering // mitigate the negative effects|||5",
   "anomalous|[əˋnɑmələs]|反常的、不規則的|adj. different from what is normal; irregular|the anomalous test results|||5",
@@ -200,12 +195,15 @@ const getTodayStr = (dateObj = new Date()) => {
 };
 
 export default function App() {
+  const todayStr = getTodayStr();
+  // 🔥 跨日偵測邏輯：判斷目前存的日期是否不是今天
+  const isNewDay = localStorage.getItem('mason-last-date') !== todayStr;
+
   const [originalDeck, setOriginalDeck] = useState(() => {
     try { 
       const saved = localStorage.getItem('mason-deck'); 
       if (saved) {
         const parsed = JSON.parse(saved);
-        // 🔥 資料庫防呆機制：過濾掉任何沒有中文解釋的無效單字
         return parsed.filter(c => c.word && c.meaning && c.meaning.trim() !== "");
       }
       return initialVocabulary; 
@@ -215,12 +213,18 @@ export default function App() {
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
+    // 🔥 如果是新的一天，強制將所有索引歸零
+    if (isNewDay) return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 };
     try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
     catch { return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
   });
 
-  const [isShuffled, setIsShuffled] = useState(() => localStorage.getItem('mason-isShuffled') === 'true');
+  const [isShuffled, setIsShuffled] = useState(() => {
+    if (isNewDay) return false;
+    return localStorage.getItem('mason-isShuffled') === 'true';
+  });
   const [shuffledWords, setShuffledWords] = useState(() => {
+    if (isNewDay) return [];
     try { return JSON.parse(localStorage.getItem('mason-shuffledWords')) || []; }
     catch { return []; }
   });
@@ -256,6 +260,29 @@ export default function App() {
   const lastViewedRef = useRef(null);
   const pdfInputRef = useRef(null);
   const csvInputRef = useRef(null);
+
+  // 初始化與背景跨日偵測
+  useEffect(() => {
+    if (isNewDay) {
+      localStorage.setItem('mason-last-date', todayStr);
+    }
+    
+    // 🔥 PWA 背景喚醒偵測：如果使用者從背景切換回 App 且已經換日，自動重置進度
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const currentToday = getTodayStr();
+        if (localStorage.getItem('mason-last-date') !== currentToday) {
+          setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
+          setIsShuffled(false);
+          setShuffledWords([]);
+          setSearchQuery(''); // 清空搜尋框避免困惑
+          localStorage.setItem('mason-last-date', currentToday);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isNewDay, todayStr]);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -525,9 +552,7 @@ export default function App() {
   }, [activity]);
   const maxChartCount = Math.max(...chartData.map(d => d.count), 10);
 
-  // === 資料庫管理與解析 ===
   const finalizeImport = (newCards) => {
-    // 🔥 解析完畢後，再次進行嚴格的資料過濾，確保單字都有中文解釋
     const validCards = newCards.filter(c => c.word && c.meaning && c.meaning.trim() !== "");
     if (validCards.length > 0) {
       setOriginalDeck(validCards); setAppMode('study'); setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
@@ -706,7 +731,6 @@ export default function App() {
 
       <div className="w-full max-w-md relative z-10">
         
-        {/* Header 頂部列 */}
         <div className="flex justify-between items-center mb-3 px-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-indigo-700 tracking-wider">M1K</h1>
@@ -721,7 +745,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 搜尋與模式切換列 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-2 mb-4">
           <div className="relative mb-2 flex gap-2">
             <div className="relative flex-1">
@@ -746,7 +769,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 主視圖 */}
         {activeDeck.length === 0 ? (
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
@@ -755,7 +777,7 @@ export default function App() {
             {appMode !== 'study' && <button onClick={() => setAppMode('study')} className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">返回全部模式</button>}
           </div>
         ) : appMode === 'quiz' ? (
-          // 🎮 測意模式 UI 
+          // 🎮 測意模式
           <div className="w-full bg-white rounded-3xl shadow-xl border border-emerald-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-400"></div>
             <div className="absolute top-4 left-4 flex gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
@@ -800,7 +822,6 @@ export default function App() {
               })}
             </div>
             
-            {/* 測意模式詳解 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
@@ -839,7 +860,7 @@ export default function App() {
             )}
           </div>
         ) : appMode === 'cloze' ? (
-          // 📝 克漏字填空模式 UI
+          // 📝 克漏字填空模式
           <div className="w-full bg-white rounded-3xl shadow-xl border border-sky-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
             <div className="absolute top-0 left-0 w-full h-1 bg-sky-400"></div>
             
@@ -913,7 +934,7 @@ export default function App() {
             
           </div>
         ) : (
-          // 📚 翻轉卡片模式 UI
+          // 📚 翻轉卡片模式
           <div className="perspective-1000 w-full h-[450px] max-h-[65vh] mb-4 cursor-pointer group" onClick={() => setIsFlipped(!isFlipped)}>
             <div className={`w-full h-full duration-500 transform-style-3d relative transition-transform ${isFlipped ? 'rotate-y-180' : ''}`}>
               
