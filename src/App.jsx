@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered, PenTool, Globe } from 'lucide-react';
 
-// === 標準洗牌演算法 (Fisher-Yates Shuffle) ===
+// === 標準洗牌演算法 (Fisher-Yates) ===
 const shuffleArray = (array) => {
   const newArr = [...array];
   for (let i = newArr.length - 1; i > 0; i--) {
@@ -269,12 +269,10 @@ export default function App() {
   const pdfInputRef = useRef(null);
   const csvInputRef = useRef(null);
 
-  // 初始化與背景跨日偵測
   useEffect(() => {
     if (isNewDay) {
       localStorage.setItem('mason-last-date', todayStr);
     }
-    
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const currentToday = getTodayStr();
@@ -484,7 +482,7 @@ export default function App() {
     return streak;
   };
 
-  // 🔥 全新升級：分池智慧洗牌演算法 (Unseen -> Error Rate -> Random)
+  // 🔥 終極升級：導入魔王加權指數的三池洗牌法
   const toggleShuffle = () => {
     if (appMode === 'quiz' || appMode === 'cloze') return; 
     setIsFlipped(false);
@@ -498,31 +496,28 @@ export default function App() {
       originalDeck.forEach(card => {
         const st = stats[card.word];
         if (!st || st.views === 0) {
-          unseen.push(card); // 完全沒背過
+          unseen.push(card);
         } else if (st.forgot > 0) {
-          learning.push(card); // 背過但有錯過
+          learning.push(card);
         } else {
-          mastered.push(card); // 背過且完全沒錯過
+          mastered.push(card);
         }
       });
 
-      // 1. 沒背過的單字隨機打亂排最前面
       unseen = shuffleArray(unseen);
 
-      // 2. 錯誤率高的單字排中間 (依錯誤率降序)
+      // 依據「魔王指數 = 錯誤率 * 錯誤次數」精準排序
       learning.sort((a, b) => {
         const stA = stats[a.word];
         const stB = stats[b.word];
-        const rateA = stA.forgot / ((stA.forgot + stA.remembered) || 1);
-        const rateB = stB.forgot / ((stB.forgot + stB.remembered) || 1);
-        if (rateB !== rateA) return rateB - rateA; // 錯誤率高 -> 低
-        return Math.random() - 0.5; // 錯誤率相同則稍微打亂
+        const scoreA = (stA.forgot / (stA.forgot + (stA.remembered || 0))) * stA.forgot;
+        const scoreB = (stB.forgot / (stB.forgot + (stB.remembered || 0))) * stB.forgot;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        return Math.random() - 0.5;
       });
 
-      // 3. 剩下的單字隨機打亂排最後
       mastered = shuffleArray(mastered);
 
-      // 組合結果並套用
       const newShuffledWords = [...unseen, ...learning, ...mastered].map(c => c.word);
       setShuffledWords(newShuffledWords); 
       setIsShuffled(true);
@@ -530,14 +525,20 @@ export default function App() {
     updateCurrentIndex(0); lastViewedRef.current = null;
   };
 
+  // 🔥 終極升級：魔王模式套用魔王加權指數
   const startBossMode = () => {
     const sortedWords = [...originalDeck]
       .map(card => {
         const st = stats[card.word] || { forgot: 0, remembered: 0 };
         const total = (st.forgot || 0) + (st.remembered || 0);
         const rate = total > 0 ? (st.forgot / total) : 0;
-        return { word: card.word, forgot: st.forgot || 0, rate: rate };
-      }).filter(w => w.forgot > 0).sort((a, b) => b.forgot - a.forgot || b.rate - a.rate).slice(0, bossN).map(w => w.word);
+        const score = rate * (st.forgot || 0); // 核心：錯誤率 * 錯誤次數
+        return { word: card.word, forgot: st.forgot || 0, score: score };
+      })
+      .filter(w => w.forgot > 0)
+      .sort((a, b) => b.score - a.score || b.forgot - a.forgot)
+      .slice(0, bossN)
+      .map(w => w.word);
 
     if (sortedWords.length === 0) { alert("🎉 您目前沒有忘記過的單字！繼續保持！"); return; }
     
@@ -767,6 +768,7 @@ export default function App() {
 
       <div className="w-full max-w-md relative z-10">
         
+        {/* Header 頂部列 */}
         <div className="flex justify-between items-center mb-3 px-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-indigo-700 tracking-wider">M1K</h1>
@@ -781,6 +783,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* 搜尋與模式切換列 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-2 mb-4">
           <div className="relative mb-2 flex gap-2">
             <div className="relative flex-1">
@@ -805,6 +808,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* 主視圖 */}
         {activeDeck.length === 0 ? (
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
@@ -858,6 +862,7 @@ export default function App() {
               })}
             </div>
             
+            {/* 測意模式詳解 */}
             {quizResult && (
               <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2">
                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
