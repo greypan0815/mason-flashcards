@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Volume2, ChevronLeft, ChevronRight, RotateCcw, Shuffle, Upload, X, Database, Download, FileSpreadsheet, FileText, Loader2, FileUp, BrainCircuit, Star, Search, Flame, Gamepad2, CalendarCheck, BarChart2, Trash2, Eye, Check, XCircle, Sparkles, TrendingUp, Skull, ListOrdered, PenTool, Globe } from 'lucide-react';
 
+// === 標準洗牌演算法 (Fisher-Yates Shuffle) ===
+const shuffleArray = (array) => {
+  const newArr = [...array];
+  for (let i = newArr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArr[i], newArr[j]] = [newArr[j], newArr[i]];
+  }
+  return newArr;
+};
+
 // === 獨立元件：中文智慧遮罩 ===
 const HiddenChineseText = ({ text }) => {
   const [revealed, setRevealed] = useState(false);
@@ -196,7 +206,6 @@ const getTodayStr = (dateObj = new Date()) => {
 
 export default function App() {
   const todayStr = getTodayStr();
-  // 🔥 跨日偵測邏輯：判斷目前存的日期是否不是今天
   const isNewDay = localStorage.getItem('mason-last-date') !== todayStr;
 
   const [originalDeck, setOriginalDeck] = useState(() => {
@@ -213,7 +222,6 @@ export default function App() {
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
-    // 🔥 如果是新的一天，強制將所有索引歸零
     if (isNewDay) return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 };
     try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
     catch { return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
@@ -267,7 +275,6 @@ export default function App() {
       localStorage.setItem('mason-last-date', todayStr);
     }
     
-    // 🔥 PWA 背景喚醒偵測：如果使用者從背景切換回 App 且已經換日，自動重置進度
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const currentToday = getTodayStr();
@@ -275,7 +282,7 @@ export default function App() {
           setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
           setIsShuffled(false);
           setShuffledWords([]);
-          setSearchQuery(''); // 清空搜尋框避免困惑
+          setSearchQuery('');
           localStorage.setItem('mason-last-date', currentToday);
         }
       }
@@ -477,19 +484,48 @@ export default function App() {
     return streak;
   };
 
+  // 🔥 全新升級：分池智慧洗牌演算法 (Unseen -> Error Rate -> Random)
   const toggleShuffle = () => {
     if (appMode === 'quiz' || appMode === 'cloze') return; 
     setIsFlipped(false);
-    if (isShuffled) { setIsShuffled(false); } 
-    else {
-      const newShuffledWords = [...originalDeck].sort((a, b) => {
-        const statA = stats[a.word] || { views: 0, forgot: 0 };
-        const statB = stats[b.word] || { views: 0, forgot: 0 };
-        if (statA.views !== statB.views) return statA.views - statB.views;
-        if (statA.forgot !== statB.forgot) return statB.forgot - statA.forgot;
-        return Math.random() - 0.5;
-      }).map(c => c.word);
-      setShuffledWords(newShuffledWords); setIsShuffled(true);
+    if (isShuffled) { 
+      setIsShuffled(false); 
+    } else {
+      let unseen = [];
+      let learning = [];
+      let mastered = [];
+
+      originalDeck.forEach(card => {
+        const st = stats[card.word];
+        if (!st || st.views === 0) {
+          unseen.push(card); // 完全沒背過
+        } else if (st.forgot > 0) {
+          learning.push(card); // 背過但有錯過
+        } else {
+          mastered.push(card); // 背過且完全沒錯過
+        }
+      });
+
+      // 1. 沒背過的單字隨機打亂排最前面
+      unseen = shuffleArray(unseen);
+
+      // 2. 錯誤率高的單字排中間 (依錯誤率降序)
+      learning.sort((a, b) => {
+        const stA = stats[a.word];
+        const stB = stats[b.word];
+        const rateA = stA.forgot / ((stA.forgot + stA.remembered) || 1);
+        const rateB = stB.forgot / ((stB.forgot + stB.remembered) || 1);
+        if (rateB !== rateA) return rateB - rateA; // 錯誤率高 -> 低
+        return Math.random() - 0.5; // 錯誤率相同則稍微打亂
+      });
+
+      // 3. 剩下的單字隨機打亂排最後
+      mastered = shuffleArray(mastered);
+
+      // 組合結果並套用
+      const newShuffledWords = [...unseen, ...learning, ...mastered].map(c => c.word);
+      setShuffledWords(newShuffledWords); 
+      setIsShuffled(true);
     }
     updateCurrentIndex(0); lastViewedRef.current = null;
   };
@@ -1181,7 +1217,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 🔥 題庫與系統管理區塊 */}
               <div className="bg-rose-50 rounded-2xl p-5 border border-rose-100">
                 <h3 className="font-bold text-rose-800 mb-3 flex items-center gap-2"><Trash2 size={18} /> 3. 題庫與系統管理</h3>
                 <div className="flex flex-col gap-2">
