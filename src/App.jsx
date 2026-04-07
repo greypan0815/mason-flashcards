@@ -11,6 +11,42 @@ const shuffleArray = (array) => {
   return newArr;
 };
 
+// === 🔥 核心演算法：分池智慧洗牌 (產生全新順序) ===
+const generateSmartShuffle = (deck, statsObj) => {
+  let unseen = [];
+  let learning = [];
+  let mastered = [];
+
+  deck.forEach(card => {
+    const st = statsObj[card.word];
+    if (!st || !st.views || st.views === 0) {
+      unseen.push(card); // 完全沒看過
+    } else if (st.forgot > 0) {
+      learning.push(card); // 有錯過
+    } else {
+      mastered.push(card); // 沒錯過
+    }
+  });
+
+  // 1. 沒背過的全隨機打亂
+  unseen = shuffleArray(unseen);
+
+  // 2. 錯誤池加入隨機干擾權重 (0.5x ~ 1.5x)，確保每次錯字的順序有變化
+  let learningScored = learning.map(card => {
+    const st = statsObj[card.word];
+    const baseScore = (st.forgot / ((st.forgot + (st.remembered || 0)) || 1)) * st.forgot;
+    const randomizedScore = baseScore * (0.5 + Math.random());
+    return { card, score: randomizedScore };
+  });
+  learningScored.sort((a, b) => b.score - a.score);
+  learning = learningScored.map(item => item.card);
+
+  // 3. 熟練的墊底並全隨機打亂
+  mastered = shuffleArray(mastered);
+
+  return [...unseen, ...learning, ...mastered].map(c => c.word);
+};
+
 // === 獨立元件：中文智慧遮罩 ===
 const HiddenChineseText = ({ text }) => {
   const [revealed, setRevealed] = useState(false);
@@ -222,17 +258,37 @@ export default function App() {
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
+    // 🔥 新的一天：強迫進度歸零
     if (isNewDay) return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 };
     try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
     catch { return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
   });
 
   const [isShuffled, setIsShuffled] = useState(() => {
-    if (isNewDay) return false;
+    // 🔥 修正 Bug：保留使用者是否開啟推題的偏好設定！
     return localStorage.getItem('mason-isShuffled') === 'true';
   });
+
+  const [stats, setStats] = useState(() => {
+    try { const saved = localStorage.getItem('mason-stats'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
+  });
+
   const [shuffledWords, setShuffledWords] = useState(() => {
-    if (isNewDay) return [];
+    const isShuf = localStorage.getItem('mason-isShuffled') === 'true';
+    if (isNewDay && isShuf) {
+      // 🔥 如果換日且偏好為開啟推題，直接用最新 stats 重新生成亂數序列
+      let tempDeck = initialVocabulary;
+      try {
+        const savedDeck = localStorage.getItem('mason-deck');
+        if (savedDeck) tempDeck = JSON.parse(savedDeck).filter(c => c.word && c.meaning && c.meaning.trim() !== "");
+      } catch(e){}
+      let tempStats = {};
+      try {
+        const savedStats = localStorage.getItem('mason-stats');
+        if (savedStats) tempStats = JSON.parse(savedStats);
+      } catch(e){}
+      return generateSmartShuffle(tempDeck, tempStats);
+    }
     try { return JSON.parse(localStorage.getItem('mason-shuffledWords')) || []; }
     catch { return []; }
   });
@@ -257,10 +313,6 @@ export default function App() {
   const [isPdfLoaded, setIsPdfLoaded] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
 
-  const [stats, setStats] = useState(() => {
-    try { const saved = localStorage.getItem('mason-stats'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
-  });
-
   const [activity, setActivity] = useState(() => {
     try { const saved = localStorage.getItem('mason-activity'); return saved ? JSON.parse(saved) : {}; } catch (e) { return {}; }
   });
@@ -269,25 +321,29 @@ export default function App() {
   const pdfInputRef = useRef(null);
   const csvInputRef = useRef(null);
 
+  // 初始化與背景跨日偵測
   useEffect(() => {
     if (isNewDay) {
       localStorage.setItem('mason-last-date', todayStr);
     }
+    
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         const currentToday = getTodayStr();
         if (localStorage.getItem('mason-last-date') !== currentToday) {
           setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
-          setIsShuffled(false);
-          setShuffledWords([]);
           setSearchQuery('');
+          // 背景跨日，重新打亂牌組並保留狀態
+          if (isShuffled) {
+            setShuffledWords(generateSmartShuffle(originalDeck, stats));
+          }
           localStorage.setItem('mason-last-date', currentToday);
         }
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isNewDay, todayStr]);
+  }, [isNewDay, todayStr, isShuffled, originalDeck, stats]);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -482,63 +538,27 @@ export default function App() {
     return streak;
   };
 
-  // 🔥 終極升級：導入魔王加權指數的三池洗牌法
   const toggleShuffle = () => {
     if (appMode === 'quiz' || appMode === 'cloze') return; 
     setIsFlipped(false);
     if (isShuffled) { 
       setIsShuffled(false); 
     } else {
-      let unseen = [];
-      let learning = [];
-      let mastered = [];
-
-      originalDeck.forEach(card => {
-        const st = stats[card.word];
-        if (!st || st.views === 0) {
-          unseen.push(card);
-        } else if (st.forgot > 0) {
-          learning.push(card);
-        } else {
-          mastered.push(card);
-        }
-      });
-
-      unseen = shuffleArray(unseen);
-
-      // 依據「魔王指數 = 錯誤率 * 錯誤次數」精準排序
-      learning.sort((a, b) => {
-        const stA = stats[a.word];
-        const stB = stats[b.word];
-        const scoreA = (stA.forgot / (stA.forgot + (stA.remembered || 0))) * stA.forgot;
-        const scoreB = (stB.forgot / (stB.forgot + (stB.remembered || 0))) * stB.forgot;
-        if (scoreB !== scoreA) return scoreB - scoreA;
-        return Math.random() - 0.5;
-      });
-
-      mastered = shuffleArray(mastered);
-
-      const newShuffledWords = [...unseen, ...learning, ...mastered].map(c => c.word);
+      const newShuffledWords = generateSmartShuffle(originalDeck, stats);
       setShuffledWords(newShuffledWords); 
       setIsShuffled(true);
     }
     updateCurrentIndex(0); lastViewedRef.current = null;
   };
 
-  // 🔥 終極升級：魔王模式套用魔王加權指數
   const startBossMode = () => {
     const sortedWords = [...originalDeck]
       .map(card => {
         const st = stats[card.word] || { forgot: 0, remembered: 0 };
-        const total = (st.forgot || 0) + (st.remembered || 0);
-        const rate = total > 0 ? (st.forgot / total) : 0;
-        const score = rate * (st.forgot || 0); // 核心：錯誤率 * 錯誤次數
+        const rate = (st.forgot || 0) / ((st.forgot || 0) + (st.remembered || 0) || 1);
+        const score = rate * (st.forgot || 0); 
         return { word: card.word, forgot: st.forgot || 0, score: score };
-      })
-      .filter(w => w.forgot > 0)
-      .sort((a, b) => b.score - a.score || b.forgot - a.forgot)
-      .slice(0, bossN)
-      .map(w => w.word);
+      }).filter(w => w.forgot > 0).sort((a, b) => b.score - a.score || b.forgot - a.forgot).slice(0, bossN).map(w => w.word);
 
     if (sortedWords.length === 0) { alert("🎉 您目前沒有忘記過的單字！繼續保持！"); return; }
     
@@ -1241,5 +1261,3 @@ export default function App() {
     </div>
   );
 }
-
-
