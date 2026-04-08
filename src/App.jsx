@@ -11,35 +11,50 @@ const shuffleArray = (array) => {
   return newArr;
 };
 
-// === 🔥 核心演算法：分池智慧洗牌 (產生全新順序) ===
+// === 🔥 核心演算法：完全捨棄 views，只看 正確/錯誤 次數 ===
 const generateSmartShuffle = (deck, statsObj) => {
   let unseen = [];
   let learning = [];
   let mastered = [];
 
   deck.forEach(card => {
-    const st = statsObj[card.word];
-    if (!st || !st.views || st.views === 0) {
-      unseen.push(card); // 完全沒看過
-    } else if (st.forgot > 0) {
-      learning.push(card); // 有錯過
+    const st = statsObj[card.word] || { forgot: 0, remembered: 0 };
+    const totalAnswered = (st.forgot || 0) + (st.remembered || 0);
+
+    if (totalAnswered === 0) {
+      unseen.push(card); // 完全沒有作答紀錄的單字 (真正的沒背過)
+    } else if ((st.forgot || 0) > 0) {
+      learning.push(card); // 有答錯紀錄的單字
     } else {
-      mastered.push(card); // 沒錯過
+      mastered.push(card); // 答過且全對的單字
     }
   });
 
   // 1. 沒背過的全隨機打亂
   unseen = shuffleArray(unseen);
 
-  // 2. 錯誤池加入隨機干擾權重 (0.5x ~ 1.5x)，確保每次錯字的順序有變化
-  let learningScored = learning.map(card => {
-    const st = statsObj[card.word];
-    const baseScore = (st.forgot / ((st.forgot + (st.remembered || 0)) || 1)) * st.forgot;
-    const randomizedScore = baseScore * (0.5 + Math.random());
-    return { card, score: randomizedScore };
+  // 2. 嚴格依照「錯誤率 -> 錯誤次數」排序，加上極微小的隨機防呆
+  learning.sort((a, b) => {
+    const stA = statsObj[a.word] || { forgot: 0, remembered: 0 };
+    const stB = statsObj[b.word] || { forgot: 0, remembered: 0 };
+    
+    const totalA = stA.forgot + stA.remembered;
+    const totalB = stB.forgot + stB.remembered;
+    
+    const rateA = stA.forgot / totalA;
+    const rateB = stB.forgot / totalB;
+
+    // 優先比對錯誤率 (差距 > 1% 就認定有高低之分)
+    if (Math.abs(rateB - rateA) > 0.01) {
+      return rateB - rateA;
+    }
+    // 錯誤率差不多時，錯比較多次的優先
+    if (stB.forgot !== stA.forgot) {
+      return stB.forgot - stA.forgot;
+    }
+    // 都一樣的話稍微打亂
+    return Math.random() - 0.5;
   });
-  learningScored.sort((a, b) => b.score - a.score);
-  learning = learningScored.map(item => item.card);
 
   // 3. 熟練的墊底並全隨機打亂
   mastered = shuffleArray(mastered);
@@ -258,14 +273,13 @@ export default function App() {
   const [appMode, setAppMode] = useState(() => localStorage.getItem('mason-appMode') || 'study');
   
   const [indexes, setIndexes] = useState(() => {
-    // 🔥 新的一天：強迫進度歸零
     if (isNewDay) return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 };
     try { return JSON.parse(localStorage.getItem('mason-indexes')) || { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
     catch { return { study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 }; }
   });
 
   const [isShuffled, setIsShuffled] = useState(() => {
-    // 🔥 修正 Bug：保留使用者是否開啟推題的偏好設定！
+    if (isNewDay) return false;
     return localStorage.getItem('mason-isShuffled') === 'true';
   });
 
@@ -274,21 +288,7 @@ export default function App() {
   });
 
   const [shuffledWords, setShuffledWords] = useState(() => {
-    const isShuf = localStorage.getItem('mason-isShuffled') === 'true';
-    if (isNewDay && isShuf) {
-      // 🔥 如果換日且偏好為開啟推題，直接用最新 stats 重新生成亂數序列
-      let tempDeck = initialVocabulary;
-      try {
-        const savedDeck = localStorage.getItem('mason-deck');
-        if (savedDeck) tempDeck = JSON.parse(savedDeck).filter(c => c.word && c.meaning && c.meaning.trim() !== "");
-      } catch(e){}
-      let tempStats = {};
-      try {
-        const savedStats = localStorage.getItem('mason-stats');
-        if (savedStats) tempStats = JSON.parse(savedStats);
-      } catch(e){}
-      return generateSmartShuffle(tempDeck, tempStats);
-    }
+    if (isNewDay) return [];
     try { return JSON.parse(localStorage.getItem('mason-shuffledWords')) || []; }
     catch { return []; }
   });
@@ -333,7 +333,6 @@ export default function App() {
         if (localStorage.getItem('mason-last-date') !== currentToday) {
           setIndexes({ study: 0, due: 0, quiz: 0, cloze: 0, starred: 0, boss: 0 });
           setSearchQuery('');
-          // 背景跨日，重新打亂牌組並保留狀態
           if (isShuffled) {
             setShuffledWords(generateSmartShuffle(originalDeck, stats));
           }
@@ -551,16 +550,21 @@ export default function App() {
     updateCurrentIndex(0); lastViewedRef.current = null;
   };
 
+  // 🔥 魔王模式同樣套用「只看錯誤率與錯誤次數」
   const startBossMode = () => {
     const sortedWords = [...originalDeck]
       .map(card => {
         const st = stats[card.word] || { forgot: 0, remembered: 0 };
-        const rate = (st.forgot || 0) / ((st.forgot || 0) + (st.remembered || 0) || 1);
-        const score = rate * (st.forgot || 0); 
-        return { word: card.word, forgot: st.forgot || 0, score: score };
-      }).filter(w => w.forgot > 0).sort((a, b) => b.score - a.score || b.forgot - a.forgot).slice(0, bossN).map(w => w.word);
+        const total = (st.forgot || 0) + (st.remembered || 0);
+        const rate = total > 0 ? (st.forgot / total) : 0;
+        return { word: card.word, forgot: st.forgot || 0, rate: rate };
+      })
+      .filter(w => w.forgot > 0)
+      .sort((a, b) => b.rate - a.rate || b.forgot - a.forgot)
+      .slice(0, bossN)
+      .map(w => w.word);
 
-    if (sortedWords.length === 0) { alert("🎉 您目前沒有忘記過的單字！繼續保持！"); return; }
+    if (sortedWords.length === 0) { alert("🎉 您目前沒有答錯過的單字！繼續保持！"); return; }
     
     setBossDeckWords(sortedWords); setAppMode('boss'); setSearchQuery('');
     setIndexes(prev => ({ ...prev, boss: 0 })); setShowBossModal(false);
@@ -788,7 +792,6 @@ export default function App() {
 
       <div className="w-full max-w-md relative z-10">
         
-        {/* Header 頂部列 */}
         <div className="flex justify-between items-center mb-3 px-1">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-black text-indigo-700 tracking-wider">M1K</h1>
@@ -803,7 +806,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 搜尋與模式切換列 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-2 mb-4">
           <div className="relative mb-2 flex gap-2">
             <div className="relative flex-1">
@@ -828,7 +830,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 主視圖 */}
         {activeDeck.length === 0 ? (
           <div className="w-full h-[400px] bg-white rounded-3xl shadow-sm border border-slate-100 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
             {appMode === 'boss' ? <Skull size={48} className="mb-4 text-rose-200" /> : <BrainCircuit size={48} className="mb-4 text-slate-200" />}
@@ -841,8 +842,8 @@ export default function App() {
           <div className="w-full bg-white rounded-3xl shadow-xl border border-emerald-100 p-5 sm:p-6 flex flex-col relative overflow-y-auto custom-scrollbar max-h-[75vh]">
             <div className="absolute top-0 left-0 w-full h-1 bg-emerald-400"></div>
             <div className="absolute top-4 left-4 flex gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字記得次數"><Check size={10}/> {cardStats.remembered}</span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字忘記次數"><X size={10}/> {cardStats.forgot}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字答對次數"><Check size={10}/> {cardStats.remembered || 0}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字答錯次數"><X size={10}/> {cardStats.forgot || 0}</span>
             </div>
             
             {currentCard.level && (
@@ -926,8 +927,8 @@ export default function App() {
             <div className="absolute top-0 left-0 w-full h-1 bg-sky-400"></div>
             
             <div className="absolute top-4 left-4 flex gap-1.5 opacity-60 hover:opacity-100 transition-opacity">
-              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字記得次數"><Check size={10}/> {cardStats.remembered}</span>
-              <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字忘記次數"><X size={10}/> {cardStats.forgot}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字答對次數"><Check size={10}/> {cardStats.remembered || 0}</span>
+              <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字答錯次數"><X size={10}/> {cardStats.forgot || 0}</span>
             </div>
 
             {currentCard.level && (
@@ -1013,9 +1014,8 @@ export default function App() {
                 <span className="absolute top-5 left-5 text-slate-300"><RotateCcw size={20} className={`transition-colors ${appMode === 'boss' ? 'group-hover:text-rose-400' : 'group-hover:text-indigo-400'}`} /></span>
                 
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-2">
-                  <span className="flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded"><Eye size={10}/> {cardStats.views}</span>
-                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100"><Check size={10}/> {cardStats.remembered}</span>
-                  <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100"><X size={10}/> {cardStats.forgot}</span>
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100" title="此單字答對次數"><Check size={10}/> {cardStats.remembered || 0}</span>
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100" title="此單字答錯次數"><X size={10}/> {cardStats.forgot || 0}</span>
                 </div>
 
                 <h2 className={`text-4xl sm:text-5xl font-extrabold mb-3 tracking-tight mt-4 ${appMode === 'boss' ? 'text-rose-700' : 'text-slate-800'}`}>{currentCard.word}</h2>
@@ -1200,7 +1200,7 @@ export default function App() {
             </div>
 
             <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 mb-5 text-sm text-rose-700 font-medium leading-relaxed">
-              系統會自動掃描您的歷史數據，將<strong>「忘記次數最多」且「忘記率最高」</strong>的前 {bossN} 個單字抓出來，為您建立專屬的魔王特訓牌組。
+              系統會嚴格依據您的歷史數據，將<strong>「答錯率最高」且「錯最多次」</strong>的前 {bossN} 個單字抓出來，為您建立專屬的魔王特訓牌組。
             </div>
 
             <button onClick={startBossMode} className="w-full flex items-center justify-center gap-2 py-3 bg-rose-600 text-white rounded-xl hover:bg-rose-700 font-bold shadow-md shadow-rose-200 transition-all text-lg active:scale-95">
